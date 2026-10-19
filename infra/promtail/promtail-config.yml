@@ -1,0 +1,31 @@
+server:
+  http_listen_port: 9080
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      # proxy en LECTURE SEULE (pas le socket Docker monté directement)
+      - host: tcp://docker-proxy-ro:2375
+        refresh_interval: 5s
+    relabel_configs:
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/(.*)"
+        target_label: container
+      - source_labels: ["__meta_docker_container_label_com_docker_compose_service"]
+        target_label: service
+    pipeline_stages:
+      # Logs applicatifs en JSON : on garde 'level' comme label (faible cardinalité)
+      - match:
+          selector: '{service=~"api|auth|waf|orchestrator|ml"}'
+          stages:
+            - json:
+                expressions:
+                  level: level
+            - labels:
+                level:

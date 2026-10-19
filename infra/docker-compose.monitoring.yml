@@ -1,0 +1,104 @@
+# À lancer avec le compose principal :
+#   docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+# Suppose que les réseaux 'front' et 'monitoring' sont déclarés dans docker-compose.yml.
+# Vérifier/épingler les versions d'images avant usage.
+
+services:
+  docker-proxy-ro:            # lecture seule, réservé à Promtail
+    image: tecnativa/docker-socket-proxy:0.2.0
+    environment:
+      CONTAINERS: 1           # lister les conteneurs et lire les logs
+      NETWORKS: 1             # requis par la découverte Docker de Promtail
+      POST: 0                 # aucune action d'écriture
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [monitoring]
+    mem_limit: 64m
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=24h
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - promdata:/prometheus
+    networks: [monitoring]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    mem_limit: 384m
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    networks: [monitoring, remediation]   # doit joindre l'orchestrateur
+    secrets: [webhook_token]              # déclaré dans docker-compose.yml
+    mem_limit: 64m
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.2.1
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - lokidata:/loki
+    networks: [monitoring]
+    mem_limit: 384m
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.2.1
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+    networks: [monitoring]
+    depends_on: [loki, docker-proxy-ro]
+    mem_limit: 128m
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}   # défini dans .env (non versionné)
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"   # accessible depuis l'hôte uniquement, pas sur le hotspot
+    networks: [monitoring, front]  # 'front' nécessaire pour publier un port (un réseau 'internal' ne le permet pas)
+    mem_limit: 256m
+    restart: unless-stopped
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    environment:
+      DATA_SOURCE_NAME: ${POSTGRES_EXPORTER_DSN}   # postgresql://user:pass@db:5432/db?sslmode=disable (dans .env)
+    networks: [back, monitoring]
+    mem_limit: 64m
+    restart: unless-stopped
+
+  cadvisor:                   # optionnel : docker compose --profile cadvisor ... (peut échouer sous WSL2)
+    profiles: ["cadvisor"]
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks: [monitoring]
+    mem_limit: 128m
+    restart: unless-stopped
+
+volumes:
+  promdata: {}
+  lokidata: {}
+  grafanadata: {}

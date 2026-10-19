@@ -1,0 +1,54 @@
+# Compose principal : réseaux, secrets, base de données.
+# Les services métier (auth, api, frontend, waf, ml, orchestrator, rag) s'ajouteront ici au fil des jours.
+# Lancement : voir Makefile (make up)
+
+name: resilience-alpha
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    networks: [back]
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 512m
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ../services/api
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${POSTGRES_DB}
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - back
+
+networks:
+  front: {}                    # seul réseau avec accès extérieur (WAF/frontend, Grafana en local)
+  back: { internal: true }     # base de données et services internes
+  monitoring: { internal: true }
+  remediation: { internal: true }   # orchestrateur, proxy Docker, Alertmanager
+
+secrets:
+  webhook_token:
+    file: ./secrets/webhook_token.txt   # fichier NON versionné (en vrai : déchiffré par SOPS)
+
+volumes:
+  dbdata: {}
