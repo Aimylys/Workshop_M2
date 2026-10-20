@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi import Depends
 from sqlalchemy import select
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from auth import verify_password, create_access_token, decode_access_token
 from models import User
@@ -23,7 +24,7 @@ app = FastAPI(
     description="API bancaire fictive - Workshop 2026",
     version="0.2.0"
 )
-
+Instrumentator().instrument(app).expose(app)
 
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="auth/login"
