@@ -39,12 +39,24 @@ services:
         condition: service_healthy
     networks:
       - back
+      - front
 
 networks:
-  front: {}                    # seul réseau avec accès extérieur (WAF/frontend, Grafana en local)
-  back: { internal: true }     # base de données et services internes
-  monitoring: { internal: true }
-  remediation: { internal: true }   # orchestrateur, proxy Docker, Alertmanager
+  front:
+    external: true
+    name: resilience-alpha_front
+
+  back:
+    external: true
+    name: resilience-alpha_back
+
+  monitoring:
+    external: true
+    name: resilience-alpha_monitoring
+
+  remediation:
+    external: true
+    name: resilience-alpha_remediation
 
 secrets:
   webhook_token:
