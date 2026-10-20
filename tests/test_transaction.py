@@ -1,77 +1,154 @@
 
-import json
-import sys
-import urllib.error
-import urllib.request
 from decimal import Decimal
 
-BASE_URL = "http://127.0.0.1:8000"
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+import main
+from auth import create_access_token
+from models import Account, Base, Transaction, User
 
 
-def api_request(path, method="GET", payload=None):
-    data = None
-    headers = {}
-
-    if payload is not None:
-        data = json.dumps(payload).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-
-    request = urllib.request.Request(
-        BASE_URL + path,
-        data=data,
-        headers=headers,
-        method=method
+@pytest.fixture
+def environnement_test(monkeypatch):
+    # Base SQLite temporaire, indépendante de PostgreSQL.
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
 
-    with urllib.request.urlopen(request, timeout=10) as response:
-        return json.load(response)
+    Base.metadata.create_all(bind=engine)
 
+    TestSessionLocal = sessionmaker(bind=engine)
 
-def main():
-    health = api_request("/health")
-    assert health["status"] == "UP"
-    assert health["database"] == "UP"
-    print("OK - API et PostgreSQL disponibles")
+    # Rediriger les sessions de l'API vers la base de test.
+    monkeypatch.setattr(main, "SessionLocal", TestSessionLocal)
 
-    accounts = api_request("/accounts")
-    assert len(accounts) >= 2
+    with TestSessionLocal() as db:
+        alice = User(
+            name="Alice Test",
+            email="alice.test@example.com",
+        )
+        bob = User(
+            name="Bob Test",
+            email="bob.test@example.com",
+        )
 
-    source = accounts[0]
-    destination = accounts[1]
+        db.add_all([alice, bob])
+        db.flush()
 
-    amount = Decimal("1.00")
-    source_before = Decimal(str(source["balance"]))
-    destination_before = Decimal(str(destination["balance"]))
+        source = Account(
+            user_id=alice.id,
+            balance=Decimal("1500.00"),
+        )
+        destination = Account(
+            user_id=bob.id,
+            balance=Decimal("750.00"),
+        )
 
-    if source_before < amount:
-        raise RuntimeError("Solde insuffisant pour le test")
+        db.add_all([source, destination])
+        db.commit()
 
-    transaction = api_request(
-        "/transactions",
-        method="POST",
-        payload={
-            "source_account_id": source["id"],
-            "destination_account_id": destination["id"],
-            "amount": str(amount)
+        alice_id = alice.id
+        source_id = source.id
+        destination_id = destination.id
+
+    token = create_access_token(alice_id)
+
+    with TestClient(main.app) as client:
+        yield {
+            "client": client,
+            "headers": {
+                "Authorization": f"Bearer {token}"
+            },
+            "session_factory": TestSessionLocal,
+            "source_id": source_id,
+            "destination_id": destination_id,
         }
+
+    engine.dispose()
+
+
+def test_virement_bancaire(environnement_test):
+    env = environnement_test
+
+    client = env["client"]
+    headers = env["headers"]
+
+    source_id = env["source_id"]
+    destination_id = env["destination_id"]
+
+    response = client.post(
+        "/transactions",
+        headers=headers,
+        json={
+            "source_account_id": source_id,
+            "destination_account_id": destination_id,
+            "amount": "100.00",
+        },
     )
 
-    assert Decimal(str(transaction["amount"])) == amount
+    assert response.status_code == 200, response.text
 
-    source_after = api_request(f"/accounts/{source['id']}")
-    destination_after = api_request(f"/accounts/{destination['id']}")
+    transaction = response.json()
 
-    assert Decimal(str(source_after["balance"])) == source_before - amount
-    assert Decimal(str(destination_after["balance"])) == destination_before + amount
+    assert transaction["source_account_id"] == source_id
+    assert transaction["destination_account_id"] == destination_id
+    assert Decimal(str(transaction["amount"])) == Decimal("100.00")
 
-    print("OK - Transaction bancaire effectuée")
-    print("OK - Débit et crédit vérifiés")
-    print("TEST DE RESILIENCE REUSSI")
+    with env["session_factory"]() as db:
+        source = db.get(Account, source_id)
+        destination = db.get(Account, destination_id)
+
+        assert source.balance == Decimal("1400.00")
+        assert destination.balance == Decimal("850.00")
+
+        transactions = db.scalars(select(Transaction)).all()
+
+        assert len(transactions) == 1
 
 
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception as error:
-        print(f"ECHEC DU TEST : {error}", file=sys.stderr)
-        sys.exit(1)
+def test_virement_solde_insuffisant(environnement_test):
+    env = environnement_test
+
+    response = env["client"].post(
+        "/transactions",
+        headers=env["headers"],
+        json={
+            "source_account_id": env["source_id"],
+            "destination_account_id": env["destination_id"],
+            "amount": "99999.00",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Solde insuffisant"
+
+    with env["session_factory"]() as db:
+        source = db.get(Account, env["source_id"])
+        destination = db.get(Account, env["destination_id"])
+
+        assert source.balance == Decimal("1500.00")
+        assert destination.balance == Decimal("750.00")
+        assert db.scalars(select(Transaction)).all() == []
+
+
+def test_virement_meme_compte(environnement_test):
+    env = environnement_test
+
+    response = env["client"].post(
+        "/transactions",
+        headers=env["headers"],
+        json={
+            "source_account_id": env["source_id"],
+            "destination_account_id": env["source_id"],
+            "amount": "100.00",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Les comptes doivent être différents"
