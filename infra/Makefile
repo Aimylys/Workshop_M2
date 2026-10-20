@@ -12,7 +12,7 @@ ANSIBLE = cd ansible && ansible-playbook $(ANSIBLE_EXTRA)
 check:
 	$(COMPOSE) config --quiet && echo "Configuration valide"
 
-up:
+up: networks
 	$(COMPOSE) up -d --build
 
 down:
@@ -41,3 +41,11 @@ reset:
 
 wipe:
 	$(COMPOSE) down -v
+
+.PHONY: networks
+
+networks:
+	docker network inspect resilience-alpha_front >/dev/null 2>&1 || docker network create resilience-alpha_front
+	docker network inspect resilience-alpha_back >/dev/null 2>&1 || docker network create --internal resilience-alpha_back
+	docker network inspect resilience-alpha_monitoring >/dev/null 2>&1 || docker network create --internal resilience-alpha_monitoring
+	docker network inspect resilience-alpha_remediation >/dev/null 2>&1 || docker network create --internal resilience-alpha_remediation
