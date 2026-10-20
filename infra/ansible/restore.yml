@@ -1,0 +1,80 @@
+# Restauration / reprise ciblée. Exemples :
+#   ansible-playbook restore.yml -e service=api                      # redémarre l'API
+#   ansible-playbook restore.yml -e service=api -e restart_mode=recreate   # recrée le conteneur
+#   ansible-playbook restore.yml -e restore_db=true                  # restaure le dernier dump
+#   ansible-playbook restore.yml -e restore_db=true -e backup_file=/chemin/dump.sql.gz
+- name: Restaurer un service ou la base
+  hosts: local
+  gather_facts: false
+  vars:
+    restart_mode: restart            # restart | recreate
+    restore_db: false
+    backup_file: ""
+    app_services: "api auth"   # arrêtés pendant la restauration de la base (si with_services)
+  tasks:
+    - name: Exiger un service ou une restauration de base
+      ansible.builtin.fail:
+        msg: "Précise -e service=<nom> ou -e restore_db=true"
+      when: service is not defined and not (restore_db | bool)
+
+    - name: Restauration de la base
+      when: restore_db | bool
+      block:
+        - name: Trouver le dump le plus récent
+          ansible.builtin.shell: "ls -1t {{ backup_dir }}/db-*.sql.gz 2>/dev/null | head -n1"
+          register: latest
+          changed_when: false
+          when: backup_file == ""
+
+        - name: Choisir le fichier de sauvegarde
+          ansible.builtin.set_fact:
+            dump: "{{ backup_file if backup_file != '' else latest.stdout }}"
+
+        - name: Échouer s'il n'y a aucun dump
+          ansible.builtin.fail:
+            msg: "Aucune sauvegarde trouvée dans {{ backup_dir }}"
+          when: dump == ""
+
+        - name: Arrêter les services applicatifs (plus d'écritures)
+          ansible.builtin.command: "{{ compose }} stop {{ app_services }}"
+          args:
+            chdir: "{{ infra_dir }}"
+          when: with_services | bool
+
+        - name: Vider le schéma public
+          ansible.builtin.shell: >
+            {{ compose }} exec -T db sh -c
+            'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"'
+          args:
+            chdir: "{{ infra_dir }}"
+
+        - name: Recharger le dump
+          ansible.builtin.shell: |
+            set -o pipefail
+            gunzip -c "{{ dump }}" | {{ compose }} exec -T db sh -c \
+              'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+          args:
+            chdir: "{{ infra_dir }}"
+            executable: /bin/bash
+
+        - name: Redémarrer les services applicatifs
+          ansible.builtin.command: "{{ compose }} start {{ app_services }}"
+          args:
+            chdir: "{{ infra_dir }}"
+          when: with_services | bool
+
+    - name: Redémarrer le service
+      ansible.builtin.command: "{{ compose }} restart {{ service }}"
+      args:
+        chdir: "{{ infra_dir }}"
+      when: service is defined and restart_mode == 'restart'
+
+    - name: Recréer le service
+      ansible.builtin.command: "{{ compose }} up -d --force-recreate --no-deps {{ service }}"
+      args:
+        chdir: "{{ infra_dir }}"
+      when: service is defined and restart_mode == 'recreate'
+
+    - name: Attendre les services
+      ansible.builtin.include_tasks: tasks/wait_healthy.yml

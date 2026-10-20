@@ -1,0 +1,19 @@
+# À lancer depuis Ubuntu (WSL), dossier infra/ansible
+# Pour inclure les services métier : -e with_services=true (ou make ... SERVICES=1)
+infra_dir: "{{ playbook_dir }}/.."
+project_name: resilience-alpha
+with_services: false
+
+compose_files: >-
+  -f docker-compose.yml -f docker-compose.monitoring.yml
+  {{ '-f docker-compose.services.yml' if (with_services | bool) else '' }}
+compose: "docker compose {{ compose_files }}"
+
+backup_dir: "{{ infra_dir }}/backups"
+
+# Services dont on attend l'état 'healthy' (doivent avoir un healthcheck)
+wait_services_base: [db, prometheus]
+wait_services_app: [auth, api, frontend, waf]
+wait_services: "{{ wait_services_base + (wait_services_app if (with_services | bool) else []) }}"
+wait_retries: 40
+wait_delay: 3
