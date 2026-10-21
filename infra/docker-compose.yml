@@ -5,6 +5,7 @@
 name: resilience-alpha
 
 services:
+
   db:
     image: postgres:16-alpine
     environment:
@@ -22,11 +23,24 @@ services:
     mem_limit: 512m
     restart: unless-stopped
 
+  waf:
+    image: owasp/modsecurity-crs:nginx
+    container_name: waf-modsecurity
+    ports:
+      - "8080:8080"
+    environment:
+      BACKEND: "http://api:8000"
+      MODSEC_RULE_ENGINE: "DetectionOnly"
+      PARANOIA: "1"
+    depends_on:
+      - api 
+    networks:
+      - front
+
+
   api:
     build:
       context: ../services/api
-    ports:
-      - "127.0.0.1:8000:8000"
     environment:
       DB_HOST: db
       DB_PORT: "5432"
