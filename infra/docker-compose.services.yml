@@ -1,0 +1,124 @@
+# Services métier. À activer SEULEMENT quand les dossiers ../services/* ont un Dockerfile :
+#   make up SERVICES=1
+# Noms de variables d'environnement à aligner avec le dev (ce sont des propositions).
+# Les ports internes supposent 8000 (FastAPI) : adapter si besoin.
+
+x-hardening: &hardening
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  read_only: true            # si un service a besoin d'écrire : tmpfs ou volume dédié, pas de read_only: false par facilité
+  tmpfs: [/tmp]
+  restart: unless-stopped
+
+x-pyhealth: &pyhealth
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+  interval: 5s
+  timeout: 3s
+  retries: 12
+  start_period: 10s
+
+services:
+  # L'API (auth incluse) est définie dans docker-compose.yml ; on ajoute ici réseaux, santé et durcissement.
+  api:
+    <<: *hardening
+    environment:
+      DEMO_USER_PASSWORD: ${TEST_USER_PASSWORD:-}   # utilisé par bootstrap.py (compte de démo)
+    networks: [app, back, monitoring]
+    healthcheck: *pyhealth
+    mem_limit: 256m
+
+  frontend:
+    build: ../services/frontend
+    networks: [app]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/ >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    mem_limit: 128m
+    restart: unless-stopped        # durcissement nginx (tmpfs, non-root) : à faire avec la cyber
+
+  waf:
+    build: ../services/waf         # Nginx + ModSecurity (cyber)
+    ports:
+      - "${PUBLISH_IP:-127.0.0.1}:8080:80"   # seul port publié de la plateforme
+    # volumes:                       # à activer avec la cyber : le WAF relit cette liste sur SIGHUP
+    #   - blocklist:/etc/modsecurity/blocklist:ro
+    networks: [front, app, monitoring]
+    depends_on:
+      api: { condition: service_healthy }
+      frontend: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/ >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    mem_limit: 256m
+    restart: unless-stopped
+
+  ml:
+    <<: *hardening
+    build: ../ml
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+      LOKI_URL: http://loki:3100
+      ORCHESTRATOR_URL: http://orchestrator:8000/webhook/alert
+    networks: [monitoring, remediation]
+    healthcheck: *pyhealth
+    mem_limit: 512m
+
+  orchestrator:
+    <<: *hardening
+    build: ../remediation
+    environment:
+      DOCKER_HOST: tcp://docker-proxy:2375     # jamais le socket Docker en direct
+      WEBHOOK_TOKEN_FILE: /run/secrets/webhook_token
+      API_URL: http://api:8000
+      TEST_USER_PASSWORD: ${TEST_USER_PASSWORD:-}   # compte de test fictif (transaction de vérification)
+    secrets: [webhook_token]
+    volumes:
+      - blocklist:/blocklist          # liste d'IP bloquées, partagée avec le WAF (lecture seule côté WAF)
+    networks: [remediation, monitoring, app]
+    depends_on: [docker-proxy]
+    healthcheck: *pyhealth
+    mem_limit: 256m
+
+  # Proxy Docker À DROITS MINIMAUX pour l'orchestrateur : lister/inspecter + stop/restart/kill.
+  # POST reste à 0 : aucune création de conteneur, aucun exec, aucune image.
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:0.2.0
+    environment:
+      CONTAINERS: 1
+      POST: 0
+      ALLOW_RESTARTS: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [remediation]
+    mem_limit: 64m
+    restart: unless-stopped
+
+  # Sauvegarde périodique de la base (fixe le RPO). Les dumps vont dans ./backups
+  backup:
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_INTERVAL: ${BACKUP_INTERVAL:-300}
+    volumes:
+      - ./backups:/backups
+    networks: [back]
+    depends_on:
+      db: { condition: service_healthy }
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          pg_dump -h db -U "${POSTGRES_USER}" "${POSTGRES_DB}" | gzip > /tmp/dump.gz && mv /tmp/dump.gz /backups/db-$$(date +%Y%m%d-%H%M%S).sql.gz
+          ls -1t /backups/db-*.sql.gz | tail -n +13 | xargs -r rm -f
+          sleep $$BACKUP_INTERVAL
+        done
+    mem_limit: 64m
+    restart: unless-stopped
+
+volumes:
+  blocklist: {}
