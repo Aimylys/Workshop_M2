@@ -1,5 +1,7 @@
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from prometheus_client import Counter
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -24,7 +26,17 @@ app = FastAPI(
     description="API bancaire fictive - Workshop 2026",
     version="0.2.0"
 )
-Instrumentator().instrument(app).expose(app)
+LOGIN_FAILED = Counter("login_failed_total", "Échecs d'authentification")
+SQL_ERRORS = Counter("sql_errors_total", "Erreurs SQL / base de données")
+TRANSACTIONS = Counter("transactions_total", "Virements traités", ["status"])
+TRANSACTIONS.labels(status="success")   # crée la série à 0
+TRANSACTIONS.labels(status="failed")
+Instrumentator(should_instrument_requests_inprogress=True, inprogress_name="http_inprogress_requests",).instrument(app).expose(app)
+
+@app.exception_handler(SQLAlchemyError)
+def sql_error_handler(request: Request, exc: SQLAlchemyError):
+    SQL_ERRORS.inc()
+    return JSONResponse(status_code=500, content={"detail": "Erreur base de données"})
 
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="auth/login"
@@ -61,6 +73,7 @@ def health():
         check_database()
         return {"status": "UP", "database": "UP"}
     except SQLAlchemyError:
+        SQL_ERRORS.inc()
         raise HTTPException(
             status_code=503,
             detail={"status": "DOWN", "database": "DOWN"}
@@ -89,8 +102,7 @@ def get_account(account_id: int):
         return account
 
 
-@app.post("/transactions", response_model=TransactionResponse, dependencies=[Depends(get_current_user)])
-def create_transaction(request: TransactionRequest):
+def _execute_transaction(request: TransactionRequest):
     if request.source_account_id == request.destination_account_id:
         raise HTTPException(
             status_code=400,
@@ -154,6 +166,16 @@ def get_transactions():
             select(Transaction).order_by(Transaction.id)
         ).all()
 
+@app.post("/transactions", response_model=TransactionResponse, dependencies=[Depends(get_current_user)])
+def create_transaction(request: TransactionRequest):
+    try:
+        result = _execute_transaction(request)
+    except Exception:
+        TRANSACTIONS.labels(status="failed").inc()
+        raise
+    TRANSACTIONS.labels(status="success").inc()
+    return result
+
 
 @app.post("/auth/login")
 def login(form_data: OAuth2PasswordRequestForm = Depends()):
@@ -172,6 +194,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
                 user.password_hash
             )
         ):
+            LOGIN_FAILED.inc()
             raise HTTPException(
                 status_code=401,
                 detail="Identifiants incorrects",
