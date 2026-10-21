@@ -1,0 +1,75 @@
+# Configuration du moteur de remédiation.
+# Les noms de services sont ceux de docker-compose (label com.docker.compose.service).
+
+project: resilience-alpha
+default_target: api          # service visé si l'alerte n'en précise pas (ex. alerte ML globale)
+cooldown_s: 45               # délai minimal entre deux remédiations sur le même service (anti-boucle)
+poll_interval_s: 2
+
+# Jamais bloquées, même si une alerte les désigne (poste de démo, hôte...)
+never_block: ["127.0.0.1", "192.168.137.1"]
+blocklist_file: /blocklist/blocked_ips.txt
+max_blocked: 50
+waf_service: waf             # reçoit un SIGHUP pour recharger sa liste de blocage
+
+# Les alertes Prometheus portent le nom du job ; certains jobs ont un autre nom de service
+job_to_service:
+  postgres: db
+
+# Table de décision : type d'alerte -> nature de l'incident
+#   availability : le service ne répond plus            -> vérifier puis redémarrer par paliers
+#   degradation  : latence / erreurs                    -> bloquer la source si connue, vérifier, redémarrer si besoin
+#   anomaly      : anomalie détectée par le ML          -> idem degradation
+#   compromise   : tentative de compromission (injection, exfiltration...)
+#                  -> CONFINEMENT uniquement ; jamais déclaré « résolu » (analyse humaine requise)
+incident_types:
+  ServiceDown: availability
+  HighErrorRate: degradation
+  HighLatencyP95: degradation
+  ml_anomaly: anomaly
+  sql_injection: compromise
+  data_exfiltration: compromise
+default_kind: degradation
+
+# Paliers d'escalade : on redémarre le premier palier, on revérifie ; sinon palier suivant.
+services:
+  db:
+    checks: [docker]
+    escalation: [[db]]
+  api:
+    checks: [docker, http]
+    http: http://api:8000/health
+    escalation: [[api], [db, api]]
+  frontend:
+    checks: [docker]
+    escalation: [[frontend]]
+  waf:
+    checks: [docker]
+    escalation: [[waf]]
+  prometheus:
+    checks: [docker, http]
+    http: http://prometheus:9090/-/healthy
+    escalation: [[prometheus]]
+
+verify:
+  http_timeout_s: 2            # une réponse plus lente que ça compte comme un échec
+  initial_timeout_s: 10        # temps laissé au service pour se rétablir après confinement, avant tout redémarrage
+  after_restart_timeout_s: 60  # temps laissé après un redémarrage
+  platform_services: [db, api]   # vérifiés en plus du service visé (ignorés s'ils ne sont pas déployés)
+  ignore_absent: true
+
+  # Transaction fictive de bout en bout (preuve de reprise métier), adaptée à l'API de services/api :
+#   POST /auth/login (formulaire : username = e-mail) puis POST /transactions (JSON).
+  transaction_test:
+    enabled: false          # passer à true quand le compte de démo existe (bootstrap.py) et que TEST_USER_PASSWORD est défini
+    base_url: http://api:8000
+    login:
+      path: /auth/login
+      form: true
+      body: { username: alice@example.com }
+      password_env: TEST_USER_PASSWORD
+      token_field: access_token
+    transaction:
+      path: /transactions
+      body: { source_account_id: 1, destination_account_id: 2, amount: "0.01" }
+      expect_status: [200, 201]

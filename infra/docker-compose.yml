@@ -64,6 +64,10 @@ networks:
     external: true
     name: resilience-alpha_back
 
+  app:
+    external: true
+    name: resilience-alpha_app
+
   monitoring:
     external: true
     name: resilience-alpha_monitoring
