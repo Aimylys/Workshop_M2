@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resilience-Alpha — Détection</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{--bg:#0e1117;--card:#1a2030;--line:#2a3346;--txt:#e6e9ef;--muted:#8b93a7;}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--txt);font-family:Segoe UI,system-ui,sans-serif;padding:20px;}
+  h1{font-size:20px;font-weight:600;margin-bottom:2px;}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:18px;}
+  #banner{border-radius:14px;padding:26px;text-align:center;margin-bottom:20px;transition:background .3s;}
+  #banner .state{font-size:40px;font-weight:700;letter-spacing:1px;}
+  #banner .reason{font-size:15px;margin-top:8px;opacity:.9;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px;}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;}
+  .kpi .label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px;}
+  .kpi .val{font-size:26px;font-weight:600;margin-top:6px;}
+  .kpi.alert{border-color:#e24b4a;}
+  .kpi.alert .val{color:#ff6b6a;}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:20px;}
+  .panel h2{font-size:14px;font-weight:600;margin-bottom:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);}
+  th{color:var(--muted);font-weight:500;}
+  .tag{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:600;}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;}
+  #conn{font-size:12px;color:var(--muted);}
+</style>
+</head>
+<body>
+  <h1>🛡️ Resilience-Alpha — Détection d'attaques en temps réel</h1>
+  <div class="sub">Analyse des KPI via Prometheus · <span id="conn">connexion…</span></div>
+
+  <div id="banner"><div class="state" id="state">—</div><div class="reason" id="reason"></div></div>
+
+  <div class="grid" id="kpis"></div>
+
+  <div class="panel" id="ragPanel" style="display:none">
+    <h2>🤖 Analyse IA (RAG + Ollama)</h2>
+    <div id="ragText" style="font-size:15px;line-height:1.6"></div>
+    <div id="ragSrc" style="font-size:12px;color:var(--muted);margin-top:10px"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Trafic (requêtes/s)</h2>
+    <canvas id="chart" height="90"></canvas>
+  </div>
+
+  <div class="panel">
+    <h2>Journal des alertes</h2>
+    <table><thead><tr><th>Heure</th><th>Type</th><th>Détail</th></tr></thead>
+    <tbody id="log"><tr><td colspan="3" style="color:var(--muted)">En attente…</td></tr></tbody></table>
+  </div>
+
+<script>
+const COLORS={
+  normal:{bg:"#163a2a",fg:"#4ade80",emoji:"🟢",label:"NORMAL"},
+  ddos:{bg:"#3a1616",fg:"#ff6b6a",emoji:"🔴",label:"DDOS"},
+  brute_force:{bg:"#3a2e16",fg:"#fbbf24",emoji:"🟠",label:"BRUTE FORCE"},
+  sql_injection:{bg:"#3a2e16",fg:"#fbbf24",emoji:"🟠",label:"INJECTION SQL"},
+  service_down:{bg:"#3a1616",fg:"#ff6b6a",emoji:"🔴",label:"SERVICE DOWN"},
+  inactif:{bg:"#23283a",fg:"#8b93a7",emoji:"⚪",label:"INACTIF"},
+};
+const KPI_DEF=[
+  ["req_per_sec","Requêtes/s"],["inprogress","En cours"],["latency_p95","Latence p95 (s)"],
+  ["login_fail_per_sec","Échecs login/s"],["sql_errors_per_sec","Erreurs SQL/s"],
+  ["err_5xx_per_sec","Erreurs 5xx/s"],["tx_ok_per_sec","Transac. OK/s"],
+];
+const ALERT_KPI={req_per_sec:80,inprogress:100,login_fail_per_sec:3,sql_errors_per_sec:2,err_5xx_per_sec:5};
+
+let lastType=null;
+const labels=[], data=[];
+const chart=new Chart(document.getElementById("chart"),{
+  type:"line",
+  data:{labels,datasets:[{data,borderColor:"#378add",backgroundColor:"rgba(55,138,221,.15)",fill:true,tension:.3,pointRadius:0,borderWidth:2}]},
+  options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#8b93a7",maxTicksLimit:8},grid:{color:"#2a3346"}},y:{beginAtZero:true,ticks:{color:"#8b93a7"},grid:{color:"#2a3346"}}}}
+});
+
+function addLog(t,type,reason){
+  const tb=document.getElementById("log");
+  if(tb.children.length===1 && tb.children[0].children.length===1) tb.innerHTML="";
+  const c=COLORS[type]||COLORS.inactif;
+  const tr=document.createElement("tr");
+  tr.innerHTML=`<td>${t}</td><td><span class="tag" style="background:${c.bg};color:${c.fg}">${c.emoji} ${c.label}</span></td><td>${reason}</td>`;
+  tb.prepend(tr);
+  while(tb.children.length>12) tb.removeChild(tb.lastChild);
+}
+
+async function tick(){
+  try{
+    const r=await fetch("/api/status");
+    const d=await r.json();
+    document.getElementById("conn").innerHTML='<span class="dot" style="background:#4ade80"></span>connecté';
+    const c=COLORS[d.type]||COLORS.inactif;
+    const banner=document.getElementById("banner");
+    banner.style.background=c.bg;
+    document.getElementById("state").textContent=c.emoji+" "+c.label;
+    document.getElementById("state").style.color=c.fg;
+    document.getElementById("reason").textContent=d.reason;
+
+    // Panneau RAG
+    const rp=document.getElementById("ragPanel");
+    if(d.rag && d.rag.text){
+      rp.style.display="block";
+      document.getElementById("ragText").textContent=d.rag.text;
+      document.getElementById("ragSrc").textContent=
+        "Sources : "+(d.rag.sources||[]).join(", ");
+    } else { rp.style.display="none"; }
+
+    // KPI tiles
+    const g=document.getElementById("kpis"); g.innerHTML="";
+    for(const [key,lab] of KPI_DEF){
+      const v=d.kpis[key]??0;
+      const alert=ALERT_KPI[key]!==undefined && v>=ALERT_KPI[key];
+      g.innerHTML+=`<div class="kpi ${alert?'alert':''}"><div class="label">${lab}</div><div class="val">${v}</div></div>`;
+    }
+
+    // chart
+    const now=new Date().toLocaleTimeString();
+    labels.push(now); data.push(d.kpis.req_per_sec??0);
+    if(labels.length>40){labels.shift();data.shift();}
+    chart.update("none");
+
+    // log only on state change to an attack
+    if(d.type!==lastType && d.type!=="normal" && d.type!=="inactif"){
+      addLog(now,d.type,d.reason);
+    }
+    lastType=d.type;
+  }catch(e){
+    document.getElementById("conn").innerHTML='<span class="dot" style="background:#ff6b6a"></span>serveur injoignable';
+  }
+}
+tick(); setInterval(tick,3000);
+</script>
+</body>
+</html>
