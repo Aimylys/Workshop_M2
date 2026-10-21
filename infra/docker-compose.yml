@@ -48,6 +48,7 @@ services:
       DB_USER: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:?DEMO_PASSWORD manquant dans .env}
     depends_on:
       db:
         condition: service_healthy
