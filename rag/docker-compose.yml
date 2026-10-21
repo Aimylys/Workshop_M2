@@ -1,0 +1,61 @@
+services:
+  # ---------- Base de données (fictive) ----------
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: payuser
+      POSTGRES_PASSWORD: paypass
+      POSTGRES_DB: paydb
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    networks: [backend]
+    # Volontairement PAS exposé au réseau pédagogique (pas de ports:)
+
+  # ---------- API métier de paiement ----------
+  api:
+    build: ./api
+    environment:
+      DATABASE_URL: postgresql://payuser:paypass@db:5432/paydb
+    depends_on: [db]
+    ports:
+      - "8000:8000"        # seule porte d'entrée publique du métier
+    networks: [backend, monitoring]
+
+  # ---------- Prometheus : métriques ----------
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks: [monitoring]
+    depends_on: [api, cadvisor]
+
+  # ---------- cAdvisor : CPU/RAM/réseau par conteneur ----------
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks: [monitoring]
+    privileged: true
+
+  # ---------- Grafana : visualisation ----------
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    ports:
+      - "3000:3000"
+    networks: [monitoring]
+    depends_on: [prometheus]
+
+volumes:
+  pgdata:
+
+networks:
+  backend:       # réseau interne : db + api, invisible de l'extérieur
+  monitoring:    # réseau observabilité
