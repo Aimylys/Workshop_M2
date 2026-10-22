@@ -45,6 +45,6 @@ scrape_configs:
       - targets: ["cadvisor:8080"]
 
   # WAF : décommenter si un exporter nginx est ajouté
-  # - job_name: waf
-  #   static_configs:
-  #     - targets: ["nginx-exporter:9113"]
+  - job_name: waf
+    static_configs:
+      - targets: ["nginx-exporter:9113"]

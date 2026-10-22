@@ -38,6 +38,7 @@ services:
       - api 
     networks:
       - front
+      - monitoring
 
 
   api:

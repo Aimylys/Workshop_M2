@@ -89,7 +89,7 @@ services:
   nginx-exporter:
     image: nginx/nginx-prometheus-exporter:latest
     command:
-      - -nginx.scrape-uri=http://localhost:8080/stub_status
+      - -nginx.scrape-uri=http://waf:8080/basic_status
     networks:
       - monitoring
 

@@ -21,6 +21,7 @@ server {
     
 
     location / {
+       
         client_max_body_size 0;
 
         if ($always_redirect = on) {
@@ -36,8 +37,11 @@ server {
 
     include includes/location_common.conf;
 
-    location = /basic_status {
+    location /basic_status {
         stub_status on;
+        allow 127.0.0.1;
+        allow 172.16.0.0/12;
+        deny all;
     }
 
 }

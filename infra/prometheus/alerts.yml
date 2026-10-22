@@ -32,3 +32,22 @@ groups:
           type: performance
         annotations:
           summary: "Latence p95 de l'API supérieure à 1 s"
+      
+      - alert: DoS-ConnectionFlood
+        expr: nginx_connections_active{job="waf"} > 200
+        for: 10s
+        labels:
+          severity: critical
+          scenario: dos_connection_flood
+        annotations:
+          summary: "Pic de connexions détecté sur le WAF"
+          description: "{{ $value }} connexions actives, seuil dépassé"
+
+      - alert: SQLi-WAFBlocked
+        expr: count_over_time({container="waf-modsecurity"} |= "Access denied" [1m]) > 20
+        for: 0s
+        labels:
+          severity: warning
+          scenario: sqli_blocked
+        annotations:
+          summary: "Blocages WAF répétés détectés"
