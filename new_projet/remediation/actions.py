@@ -9,7 +9,9 @@ doit appartenir à config.RESTARTABLE. La remédiation ne peut donc pas devenir 
 from __future__ import annotations
 
 import ipaddress
+import json
 import subprocess
+import urllib.request
 
 from . import config
 
@@ -64,6 +66,24 @@ def unblock_ip(ip: str) -> tuple[str, str]:
     cmd = f"sed -i '\\#^{ip}$#d' {config.BLOCKLIST_IN_WAF} && nginx -s reload"
     r = _compose("exec", "-T", config.WAF_SERVICE, "sh", "-c", cmd)
     return ("ok", f"{ip} débloquée") if r.returncode == 0 else ("failed", r.stderr.strip()[:200])
+
+
+def stop_local_attack(label: str) -> tuple[str, str]:
+    """Labo fermé : arrête l'attaque à sa SOURCE via la console (l'« attaquant » est notre propre
+    harnais de test). N'agit QUE sur un profil d'attaque prédéfini — jamais une cible arbitraire —
+    et seulement sur la console locale. Idempotent : stopper une attaque déjà arrêtée renvoie ok."""
+    if label not in config.LAB_STOP_PATTERNS:
+        return "skipped", f"« {label} » n'est pas un profil d'attaque local"
+    url = f"{config.CONSOLE_URL}/api/attacks/{label}/stop"
+    try:
+        req = urllib.request.Request(url, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            data = json.load(r)
+    except Exception as exc:  # noqa: BLE001
+        return "failed", f"console injoignable ({config.CONSOLE_URL}) : {type(exc).__name__}"
+    if data.get("ok"):
+        return "ok", f"attaque « {label} » stoppée à la source (harnais de test du labo)"
+    return "failed", str(data.get("error", "réponse inattendue"))[:150]
 
 
 def restart_service(name: str) -> tuple[str, str]:

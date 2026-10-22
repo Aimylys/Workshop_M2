@@ -11,6 +11,14 @@ JOURNAL = ROOT / "remediation" / "journal" / "actions.jsonl"
 PROM_URL = "http://127.0.0.1:9090"
 LOKI_URL = "http://127.0.0.1:3100"
 BASE_URL = "http://127.0.0.1:8088"          # point d'entrée (le WAF)
+CONSOLE_URL = "http://127.0.0.1:8060"       # console (pilote les attaques du harnais de test)
+
+# --- Confinement « labo fermé » ---
+# En production, une attaque réseau est bloquée par son IP au WAF (ci-dessous). Mais dans le labo
+# fermé, l'attaque part de notre PROPRE harnais de test : son IP source est la passerelle Docker
+# locale, donc protégée (never_block) et jamais bloquée. On la stoppe alors à la SOURCE, via la
+# console (seuls ces profils prédéfinis, jamais une action arbitraire).
+LAB_STOP_PATTERNS = ("ddos", "brute_force", "sql_injection", "port_scan")
 
 # --- Blocage d'IP (liste lue par le WAF, rechargée à chaud) ---
 WAF_SERVICE = "waf"

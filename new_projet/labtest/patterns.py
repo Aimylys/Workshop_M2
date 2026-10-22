@@ -7,7 +7,7 @@ connexions PERSISTANTES (keep-alive) et un débit de requêtes BORNÉ : la signa
 (débit, échecs, requêtes bloquées, 404…) sans effondrer l'observabilité.
 
 Correspondance profil -> signature attendue :
-  ddos          : req_per_sec ↑↑ (200 sur /health), inprogress ↑, latence paiement ↑, tx_ok ↓
+  ddos          : edge_req_per_sec ↑↑ (~150/s sur /health), inprogress ↑, latence paiement ↑
   brute_force   : login_fail_per_sec ↑↑, latence login ↑
   sql_injection : waf_blocked_per_sec ↑↑ (403, arrêtées au WAF)
   port_scan     : waf_404_per_sec ↑↑ (chemins d'API inexistants)
@@ -91,8 +91,11 @@ def _run(base: str, duration: float, workers: int, rate_per_worker: float, make_
 
 
 # ------------------------------------------------------------------ DDoS (débit)
-def ddos(base: str, duration: float, workers: int = 2, rate: float = 30.0) -> dict:
-    """Débit soutenu de requêtes sur un point public (keep-alive). ~60 req/s, ~12× le normal."""
+def ddos(base: str, duration: float, workers: int = 4, rate: float = 60.0) -> dict:
+    """Débit soutenu sur un point public (keep-alive). ~65 req/s effectifs (chaque requête est
+    bornée par la latence du WAF, ~60 ms) : >13× le trafic normal. La signature ressort sur
+    edge_req_per_sec / inprogress / latence (le /health est exclu de req_per_sec). 4 connexions
+    PERSISTANTES seulement : pas de churn de connexions, donc pas de saturation du proxy localhost."""
     codes = _run(base, duration, workers, rate,
                  lambda c: c.request("GET", "/api/pay/health"))
     return {"pattern": "ddos", "requests": sum(codes.values()), "codes": dict(codes)}

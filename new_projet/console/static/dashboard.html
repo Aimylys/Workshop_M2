@@ -7,30 +7,59 @@
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: system-ui, sans-serif; background: #0b1020; color: #e5e9f0; }
-  header { display: flex; align-items: center; justify-content: space-between;
-           padding: 14px 24px; border-bottom: 1px solid #1e2742; background: #0e142a; }
-  header h1 { font-size: 16px; margin: 0; letter-spacing: .5px; color: #9fb3d1; font-weight: 600; }
-  header .right { font-size: 13px; color: #6b7a99; }
-  header a { color: #7aa2f7; text-decoration: none; font-weight: 600; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #e5e9f0;
+         background: radial-gradient(1100px 480px at 50% -8%, #16203f 0%, #0a0e1c 58%) fixed; }
+  header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center;
+           justify-content: space-between; padding: 13px 24px; border-bottom: 1px solid #1e2742;
+           background: rgba(12,18,38,.82); backdrop-filter: blur(10px); }
+  .brand { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700;
+           letter-spacing: .6px; color: #dbe3f4; }
+  .brand .logo { color: #7aa2f7; font-size: 20px; line-height: 1; }
+  .brand em { font-style: normal; font-weight: 600; color: #7aa2f7; }
+  header .right { font-size: 13px; color: #6b7a99; display: flex; align-items: center; gap: 10px; }
+  header a { color: #ff9a8c; text-decoration: none; font-weight: 600; background: #2c1016;
+             border: 1px solid #5a2a24; padding: 5px 11px; border-radius: 999px; }
+  header a:hover { background: #3a161c; }
+  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #7ee2a8;
+              box-shadow: 0 0 0 3px rgba(126,226,168,.18); animation: pulse 1.6s infinite; }
   main { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
-  .banner { border-radius: 14px; padding: 22px 26px; margin-bottom: 20px; border: 1px solid;
-            display: flex; align-items: center; justify-content: space-between; transition: .3s; }
+  .banner { border-radius: 16px; padding: 22px 26px; margin-bottom: 20px; border: 1px solid;
+            display: flex; align-items: center; justify-content: space-between; transition: .3s;
+            box-shadow: 0 10px 30px rgba(0,0,0,.28); }
   .banner .state { font-size: 30px; font-weight: 800; letter-spacing: 1px; }
   .banner .sub { font-size: 14px; margin-top: 4px; opacity: .85; }
   .banner .conf { font-size: 13px; text-align: right; opacity: .8; }
   .b-normal  { background: #0f2a1a; border-color: #1f7a4d; color: #7ee2a8; }
   .b-attack  { background: #2c1016; border-color: #c0392b; color: #ff9a8c; }
   .b-unknown { background: #2a2410; border-color: #b8860b; color: #ffd98a; }
+  .b-remed   { background: #10233f; border-color: #2f6fd0; color: #8fc1ff; }
   .b-wait    { background: #131a30; border-color: #2a3657; color: #9fb3d1; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+  .b-remed .state { animation: pulse 1.1s ease-in-out infinite; }
+  .ribbon { border-radius: 10px; padding: 12px 18px; margin-bottom: 18px; font-size: 14px;
+            font-weight: 600; display: none; }
+  .ribbon.show { display: block; }
+  .ribbon.ok { background: #0f2a1a; border: 1px solid #1f7a4d; color: #7ee2a8; }
+  .ribbon.contained { background: #1b2340; border: 1px solid #3a5bbf; color: #a9c2ff; }
+  .remedbtn { margin-top: 12px; width: 100%; padding: 12px 16px; font-size: 14px; font-weight: 700;
+              color: #fff; background: #c0392b; border: 0; border-radius: 9px; cursor: pointer;
+              letter-spacing: .3px; transition: .15s; }
+  .remedbtn:hover { background: #d8452f; }
+  .remedbtn:disabled { background: #333a52; color: #7c87a3; cursor: not-allowed; }
+  .remedmsg { font-size: 12px; color: #9fb3d1; margin-top: 8px; min-height: 16px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
-  .tile { background: #121a33; border: 1px solid #1e2742; border-radius: 10px; padding: 12px 14px; }
+  .tile { background: linear-gradient(180deg, #141d3a, #111831); border: 1px solid #1e2742;
+          border-radius: 12px; padding: 13px 15px; box-shadow: 0 6px 18px rgba(0,0,0,.22);
+          transition: transform .15s, border-color .15s; }
+  .tile:hover { transform: translateY(-2px); border-color: #2a3657; }
   .tile .k { font-size: 11px; color: #6b7a99; text-transform: uppercase; letter-spacing: .5px; }
   .tile .v { font-size: 22px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
-  .tile.hot { border-color: #c0392b; background: #1c1220; }
+  .tile.hot { border-color: #c0392b; background: linear-gradient(180deg, #241320, #1c1220);
+              box-shadow: 0 6px 18px rgba(192,57,43,.18); }
   .cols { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; }
   @media (max-width: 820px) { .cols { grid-template-columns: 1fr; } }
-  .card { background: #121a33; border: 1px solid #1e2742; border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; }
+  .card { background: #121a33; border: 1px solid #1e2742; border-radius: 14px; padding: 16px 18px;
+          margin-bottom: 16px; box-shadow: 0 8px 24px rgba(0,0,0,.22); }
   .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: #6b7a99; margin: 0 0 10px; }
   .chart { width: 100%; height: 160px; display: block; }
   .legend { font-size: 12px; color: #9fb3d1; margin-top: 6px; }
@@ -48,8 +77,8 @@
 </head>
 <body>
 <header>
-  <h1>● SOC — SUPERVISION RESILIENCE-ALPHA</h1>
-  <div class="right">Détection kNN + assistant RAG &nbsp;·&nbsp; <a href="/attacker">Console attaquant →</a></div>
+  <div class="brand"><span class="logo">⬢</span> ALPHAPAY <em>· SOC</em></div>
+  <div class="right"><span class="live-dot"></span> Détection kNN + RAG <a href="/attacker">⚡ Console attaquant</a></div>
 </header>
 <main>
   <div id="banner" class="banner b-wait">
@@ -57,6 +86,7 @@
     <div class="conf" id="conf"></div>
   </div>
 
+  <div id="ribbon" class="ribbon"></div>
   <div id="err"></div>
   <div class="grid" id="tiles"></div>
 
@@ -83,8 +113,10 @@
         <div class="sources" id="sources"></div>
       </div>
       <div class="card">
-        <h2>Remédiation possible</h2>
+        <h2>Remédiation</h2>
         <div class="rem" id="rem">—</div>
+        <button id="remedbtn" class="remedbtn" style="display:none" onclick="triggerRemed()">⚡ Déclencher la remédiation</button>
+        <div class="remedmsg" id="remedmsg"></div>
       </div>
       <div class="card">
         <h2>Remédiation automatique — journal</h2>
@@ -120,11 +152,18 @@ async function tick() {
   err.innerHTML = ""; lastReady = Date.now();
 
   const v = d.verdict, attack = v.is_attack, unknown = v.label === "inconnu";
-  setBanner(attack ? "attack" : unknown ? "unknown" : "normal",
-            attack ? "ATTAQUE : " + v.label.toUpperCase() : unknown ? "ÉTAT INCONNU" : "TRAFIC NORMAL",
-            attack ? "une attaque est en cours sur la plateforme" :
-            unknown ? "état inhabituel — escalade humaine" : "aucune menace détectée",
-            `confiance ${Math.round(v.confidence*100)}%\ndistance ${v.distance}`);
+  if (d.remediating) {
+    setBanner("remed", "REMÉDIATION EN COURS",
+              "neutralisation de l'attaque et vérification de la reprise…", "");
+  } else {
+    setBanner(attack ? "attack" : unknown ? "unknown" : "normal",
+              attack ? "ATTAQUE : " + v.label.toUpperCase() : unknown ? "ÉTAT INCONNU" : "TRAFIC NORMAL",
+              attack ? "une attaque est en cours sur la plateforme" :
+              unknown ? "état inhabituel — escalade humaine" : "aucune menace détectée",
+              `confiance ${Math.round(v.confidence*100)}%\ndistance ${v.distance}`);
+  }
+  updateRibbon(d.last_incident, attack, d.remediating);
+  updateRemedButton(d, attack);
 
   // Tuiles KPI
   const hot = new Set((v.triggers||[]).map(t => t[0]));
@@ -159,6 +198,48 @@ function setBanner(kind, state, sub, conf="") {
   document.getElementById("conf").textContent = conf;
 }
 
+let remedRequested = 0;          // instant du clic (pour relier le clic au démarrage réel)
+let remedMarks = [];             // instants où la remédiation a clos un incident (repères sur la courbe)
+
+function updateRemedButton(d, attack) {
+  const btn = document.getElementById("remedbtn");
+  if (!d.engine_available) { btn.style.display = "none"; return; }
+  const bridging = (Date.now() - remedRequested) < 8000;     // le temps que le moteur démarre
+  if (d.remediating || bridging) {
+    btn.style.display = "block"; btn.disabled = true; btn.textContent = "⏳ Remédiation en cours…";
+  } else if (attack) {
+    btn.style.display = "block"; btn.disabled = false;
+    btn.textContent = "⚡ Déclencher la remédiation (" + d.verdict.label + ")";
+  } else {
+    btn.style.display = "none";
+  }
+}
+
+async function triggerRemed() {
+  const btn = document.getElementById("remedbtn"), msg = document.getElementById("remedmsg");
+  remedRequested = Date.now();
+  btn.disabled = true; btn.textContent = "⏳ Remédiation en cours…";
+  msg.textContent = "demande envoyée au moteur de remédiation…";
+  try {
+    const r = await (await fetch("/api/remediate", { method: "POST" })).json();
+    msg.textContent = r.ok ? ("✓ " + (r.status || "lancée")) : ("⚠ " + (r.status || r.error || "refusé"));
+    if (!r.ok) remedRequested = 0;          // refusé : réafficher le bouton tout de suite
+  } catch (e) { msg.textContent = "⚠ console injoignable"; remedRequested = 0; }
+}
+
+function updateRibbon(inc, attack, remediating) {
+  const rb = document.getElementById("ribbon");
+  if (!inc || attack || remediating || (Date.now()/1000 - inc.ts) > 30) { rb.className = "ribbon"; return; }
+  if (inc.status === "resolved") {
+    rb.className = "ribbon show ok";
+    rb.textContent = `✓ Attaque « ${inc.type} » neutralisée — trafic rétabli (remédiation en ${inc.duration} s).`;
+  } else if (inc.status === "contained") {
+    rb.className = "ribbon show contained";
+    rb.textContent = `✓ Attaque « ${inc.type} » confinée, source bloquée/coupée (${inc.duration} s).`
+      + (inc.type === "sql_injection" ? " Analyse humaine requise (compromission)." : "");
+  } else { rb.className = "ribbon"; }
+}
+
 async function drawChart() {
   let h;
   try { h = await (await fetch("/api/history")).json(); } catch { return; }
@@ -178,11 +259,21 @@ async function drawChart() {
   let bands = "";
   pts.forEach((p, i) => { if (p.label !== "normal" && p.label !== "inconnu")
     bands += `<rect x="${x(i)-1.5}" y="0" width="3" height="${H}" fill="#c0392b" opacity="0.18"/>`; });
-  svg.innerHTML = bands + paths + `<text x="6" y="14" fill="#6b7a99" font-size="11">max ${max.toFixed(0)}</text>`;
+  // repères verts : instant où la remédiation a neutralisé l'attaque (le trafic retombe ensuite)
+  let marks = "";
+  const t0 = pts[0].t, tN = pts[pts.length-1].t, span = Math.max(1, tN - t0);
+  for (const m of remedMarks) {
+    if (m.ts < t0 || m.ts > tN) continue;
+    const mx = pad + (m.ts - t0)/span * (W - 2*pad);
+    const col = m.status === "resolved" ? "#9ece6a" : "#7aa2f7";
+    marks += `<line x1="${mx.toFixed(1)}" y1="0" x2="${mx.toFixed(1)}" y2="${H}" stroke="${col}" stroke-width="1.4" stroke-dasharray="4 3"/>`
+          +  `<text x="${(mx+3).toFixed(1)}" y="12" fill="${col}" font-size="10">✓ remédiation</text>`;
+  }
+  svg.innerHTML = bands + marks + paths + `<text x="6" y="26" fill="#6b7a99" font-size="11">max ${max.toFixed(0)}</text>`;
 }
 
-const STEP_COLOR = { detected:"#e0af68", containment:"#f7768e", restart:"#7aa2f7",
-  verification:"#9ece6a", closed:"#bb9af7", error:"#f7768e" };
+const STEP_COLOR = { detected:"#e0af68", containment:"#f7768e", "lab-containment":"#f7768e",
+  restart:"#7aa2f7", verification:"#9ece6a", closed:"#bb9af7", error:"#f7768e" };
 const STATUS_ICON = { ok:"✓", resolved:"✓", contained:"⛉", skipped:"·", failed:"✗", running:"…" };
 async function remediation() {
   let d;
@@ -197,6 +288,8 @@ async function remediation() {
     const t = new Date(e.ts * 1000).toLocaleTimeString("fr-FR");
     return `<li><span style="color:${c}">${ic} ${e.step}</span><span class="muted" style="max-width:62%;text-align:right">${(e.detail||e.status).slice(0,90)}</span></li>`;
   }).join("");
+  // instants de clôture -> repères verts sur la courbe de trafic
+  remedMarks = d.entries.filter(e => e.step === "closed").map(e => ({ ts: e.ts, status: e.status }));
 }
 
 tick(); drawChart(); remediation();

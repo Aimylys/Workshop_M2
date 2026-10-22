@@ -18,6 +18,11 @@ La **détection décide**, la **remédiation agit**, l'**assistant RAG explique*
 | `port_scan` | reconnaissance | bloque l'IP source, surveille |
 | `sql_injection` | compromission | **confinement seul** : bloque l'IP, alerte — **jamais** « résolu » automatiquement |
 
+- **Arrêt de l'attaque** : en production, l'IP source est **bloquée au WAF** (requêtes en 403).
+  Dans le **labo fermé**, l'attaque part de notre propre harnais de test : son IP est la passerelle
+  Docker locale, donc protégée (`never_block`) et jamais bloquée. La remédiation la **coupe alors à
+  la source** via la console (`POST /api/attacks/<profil>/stop`) — étape `lab-containment` du journal.
+  C'est pour cela que, depuis la console, l'attaque s'arrête *vraiment* après la détection.
 - **IP source** : retrouvée dans **Loki** (journaux WAF/auth), car les KPI sont agrégés.
 - **Preuve de reprise** : `/health` **plus** une **transaction de test réussie** (compte `probe`),
   pas un simple redémarrage.

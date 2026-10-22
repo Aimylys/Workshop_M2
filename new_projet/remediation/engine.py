@@ -71,15 +71,24 @@ class RemediationEngine:
 
     # ---------- déroulé ----------
     def _contain(self, inc: dict) -> None:
-        """Bloque l'IP source identifiée dans les journaux (si applicable)."""
+        """Arrête l'attaque. En production : blocage de l'IP source au WAF. Si la source est locale
+        (passerelle Docker, protégée never_block) ou introuvable, c'est que l'attaque vient de notre
+        propre harnais de test : on la stoppe alors à la source via la console."""
         if inc["type"] == "service_down":
             return                                   # une panne n'a pas d'IP source
         ip, candidates = sources.top_source_ip(inc["type"])
-        if not ip:
-            self._log(inc, "containment", "skipped", "aucune IP source identifiée dans les journaux")
-            return
-        status, detail = actions.block_ip(ip)
-        self._log(inc, "containment", status, f"{detail} (candidats: {candidates[:3]})")
+        blocked_at_edge = False
+        if ip:
+            status, detail = actions.block_ip(ip)
+            self._log(inc, "containment", status, f"{detail} (candidats: {candidates[:3]})")
+            blocked_at_edge = status == "ok"
+        else:
+            self._log(inc, "containment", "skipped", "aucune IP source externe identifiée (Loki)")
+
+        # L'IP n'a pas pu être bloquée au WAF → source locale (labo fermé) : on coupe à la source.
+        if not blocked_at_edge and inc["type"] in config.LAB_STOP_PATTERNS:
+            status, detail = actions.stop_local_attack(inc["type"])
+            self._log(inc, "lab-containment", status, detail)
 
     def _restart_and_verify(self, inc: dict) -> bool:
         """Redémarre les services cibles par paliers jusqu'à reprise vérifiée."""
@@ -109,8 +118,9 @@ class RemediationEngine:
         # 2. Compromission : on confine, on NE déclare PAS résolu (analyse humaine).
         if kind == "compromise":
             return self._finish(inc, "contained",
-                                "source confinée ; injection arrêtée au WAF. Analyse des journaux et "
-                                "contrôle d'intégrité à réaliser par un humain (pas de reprise automatique).")
+                                "source confinée (IP bloquée au WAF, ou attaque coupée à la source). "
+                                "Analyse des journaux et contrôle d'intégrité à réaliser par un humain "
+                                "(pas de reprise automatique pour une compromission).")
 
         # 3. Disponibilité : vérifier, redémarrer par paliers si besoin.
         if kind == "availability":

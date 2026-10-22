@@ -7,47 +7,72 @@
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: system-ui, sans-serif; background: #130b10; color: #f0e5e9; }
-  header { display: flex; align-items: center; justify-content: space-between;
-           padding: 14px 24px; border-bottom: 1px solid #3a1e28; background: #1c0e14; }
-  header h1 { font-size: 16px; margin: 0; color: #ff9a8c; font-weight: 600; letter-spacing: .5px; }
-  header a { color: #7aa2f7; text-decoration: none; font-weight: 600; }
-  main { padding: 20px 24px; max-width: 980px; margin: 0 auto; }
-  .warn { background: #241017; border: 1px solid #c0392b; border-radius: 10px; padding: 10px 16px;
-          font-size: 13px; color: #ffb3a7; margin-bottom: 18px; }
-  .live { background: #0e142a; border: 1px solid #1e2742; border-radius: 10px; padding: 12px 16px;
-          margin-bottom: 20px; font-size: 14px; color: #9fb3d1; display: flex; justify-content: space-between; align-items: center; }
-  .live b { font-size: 16px; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
-  .card { background: #1c121a; border: 1px solid #3a1e28; border-radius: 12px; padding: 16px 18px; }
-  .card.on { border-color: #c0392b; background: #261017; box-shadow: 0 0 0 1px #c0392b inset; }
-  .card h3 { margin: 0 0 4px; font-size: 16px; }
-  .card .eff { font-size: 12px; color: #c99; margin-bottom: 12px; line-height: 1.5; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #f0e5e9;
+         background: radial-gradient(1100px 480px at 50% -8%, #3a1522 0%, #140a0f 58%) fixed; }
+  header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center;
+           justify-content: space-between; padding: 13px 24px; border-bottom: 1px solid #3a1e28;
+           background: rgba(28,14,20,.82); backdrop-filter: blur(10px); }
+  .brand { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700;
+           letter-spacing: .6px; color: #ffd9d0; }
+  .brand .logo { color: #ff6b5a; font-size: 20px; line-height: 1; }
+  .brand em { font-style: normal; font-weight: 600; color: #ff6b5a; }
+  header a { color: #7aa2f7; text-decoration: none; font-weight: 600; background: #0e142a;
+             border: 1px solid #243056; padding: 5px 11px; border-radius: 999px; }
+  header a:hover { background: #141d3a; }
+  main { padding: 22px 24px; max-width: 1000px; margin: 0 auto; }
+  .warn { background: linear-gradient(180deg, #2a1017, #241017); border: 1px solid #c0392b;
+          border-radius: 12px; padding: 11px 16px; font-size: 13px; color: #ffb3a7;
+          margin-bottom: 18px; display: flex; gap: 10px; align-items: center; }
+  .warn .ico { font-size: 18px; }
+  .live { background: linear-gradient(180deg, #171022, #130d1c); border: 1px solid #2a2440;
+          border-radius: 12px; padding: 14px 18px; margin-bottom: 22px; font-size: 14px;
+          color: #b9a9d1; display: flex; justify-content: space-between; align-items: center;
+          box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+  .live .lbl { display: flex; align-items: center; gap: 9px; }
+  .live .pulse { width: 8px; height: 8px; border-radius: 50%; background: #7aa2f7;
+                 box-shadow: 0 0 0 3px rgba(122,162,247,.18); animation: blink 1.6s infinite; }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+  .live b { font-size: 17px; font-variant-numeric: tabular-nums; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
+  .card { background: linear-gradient(180deg, #1e131b, #190f16); border: 1px solid #3a1e28;
+          border-radius: 14px; padding: 17px 19px; box-shadow: 0 8px 24px rgba(0,0,0,.25);
+          transition: transform .15s, border-color .15s, box-shadow .2s; }
+  .card:hover { transform: translateY(-2px); border-color: #5a2a36; }
+  .card.on { border-color: #c0392b; background: linear-gradient(180deg, #2b1019, #231017);
+             box-shadow: 0 0 0 1px #c0392b inset, 0 10px 28px rgba(192,57,43,.22); }
+  .card h3 { margin: 0 0 5px; font-size: 16px; color: #ffe3dd; }
+  .card .eff { font-size: 12.5px; color: #c99; margin-bottom: 14px; line-height: 1.55; }
   .row { display: flex; gap: 8px; align-items: center; }
-  button { border: 0; border-radius: 8px; padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; }
-  .go { background: #c0392b; color: #fff; } .go:hover { background: #d8452f; }
+  button { border: 0; border-radius: 9px; padding: 9px 16px; font-size: 13px; font-weight: 700;
+           cursor: pointer; letter-spacing: .3px; transition: .15s; }
+  .go { background: linear-gradient(180deg, #d8452f, #c0392b); color: #fff; }
+  .go:hover { background: linear-gradient(180deg, #e65540, #d8452f); }
   .stop { background: #2a3657; color: #cdd6f4; } .stop:hover { background: #38466e; }
-  button:disabled { opacity: .4; cursor: default; }
+  button:disabled { opacity: .38; cursor: default; }
   .state { margin-left: auto; font-size: 12px; font-weight: 700; }
   .state.run { color: #ff6b5a; } .state.idle { color: #6b7a99; }
+  footer { max-width: 1000px; margin: 22px auto 0; padding: 0 24px; font-size: 12px; color: #8a6b73; }
 </style>
 </head>
 <body>
 <header>
-  <h1>⚡ CONSOLE ATTAQUANT (LABORATOIRE LOCAL)</h1>
+  <div class="brand"><span class="logo">⬢</span> ALPHAPAY <em>· RED TEAM</em></div>
   <div><a href="/">← Dashboard SOC</a></div>
 </header>
 <main>
-  <div class="warn">Environnement fermé : toutes les attaques visent uniquement la plateforme locale
-    (127.0.0.1). Rôle du « PC Attaquant » du sujet. Observe l'effet en direct sur le dashboard SOC.</div>
+  <div class="warn"><span class="ico">⚠️</span><span>Environnement fermé : toutes les attaques visent
+    uniquement la plateforme locale (127.0.0.1). Rôle du « PC attaquant » du sujet. Observe l'effet
+    en direct sur le dashboard SOC.</span></div>
 
   <div class="live">
-    <span>Verdict actuel du détecteur :</span>
+    <span class="lbl"><span class="pulse"></span> Verdict actuel du détecteur</span>
     <b id="verdict">…</b>
   </div>
 
   <div class="cards" id="cards"></div>
 </main>
+<footer>Chaque attaque est jouée par le harnais local (connexions persistantes, débit borné).
+  Lance une attaque, puis regarde le dashboard SOC détecter, expliquer et remédier.</footer>
 
 <script>
 const ATTACKS = {

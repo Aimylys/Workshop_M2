@@ -51,6 +51,10 @@ class State:
         self.detector_error = None
         self.assistant = None
         self.assistant_error = None
+        self.engine = None               # moteur de remédiation (déclenché depuis le dashboard)
+        self.engine_error = None
+        self.remediating = False         # une remédiation est en cours
+        self.last_incident = None        # dernier incident traité (pour le bandeau « rétabli »)
         self.attacks = AttackManager()
         self.history = deque(maxlen=HISTORY_SIZE)
         self.rag_cache: dict[str, dict] = {}
@@ -73,6 +77,21 @@ def load_models():
         state.assistant = Assistant()
     except Exception as exc:  # noqa: BLE001
         state.assistant_error = f"{type(exc).__name__}: {exc}"
+    try:
+        from remediation.engine import RemediationEngine
+        state.engine = RemediationEngine()
+    except Exception as exc:  # noqa: BLE001
+        state.engine_error = f"{type(exc).__name__}: {exc}"
+
+
+def _incident_summary(inc: dict | None) -> dict | None:
+    """Résumé court du dernier incident, pour le bandeau « trafic rétabli »."""
+    if not inc:
+        return None
+    dur = round(inc.get("ended", inc["started"]) - inc["started"], 1)
+    return {"id": inc["id"], "type": inc["type"], "status": inc["status"],
+            "note": inc.get("note", ""), "duration": dur,
+            "ts": inc.get("ended", inc["started"])}
 
 
 def rag_for(label: str, triggers: list) -> dict | None:
@@ -137,7 +156,57 @@ def status():
         "rag": rag_for(verdict.label, verdict.triggers),
         "attacks": state.attacks.status(),
         "assistant_available": state.assistant is not None,
+        "engine_available": state.engine is not None,
+        "remediating": state.remediating,
+        "last_incident": _incident_summary(state.last_incident),
     }
+
+
+@app.post("/api/remediate")
+def remediate():
+    """Déclenche le script de remédiation pour l'attaque en cours (bouton du dashboard).
+
+    La détection fournit le verdict (type + confiance) ; le moteur exécute l'action prédéfinie,
+    vérifie la reprise et journalise. Tourne en tâche de fond : le dashboard suit la progression
+    via /api/remediation et le drapeau « remediating »."""
+    if state.engine is None:
+        return JSONResponse({"ok": False, "error": f"moteur de remédiation indisponible "
+                            f"({state.engine_error})"}, status_code=503)
+    if state.detector is None:
+        return JSONResponse({"ok": False, "error": "détecteur non chargé"}, status_code=503)
+    with state.lock:
+        if state.remediating:
+            return {"ok": True, "status": "remédiation déjà en cours"}
+    try:
+        state.detector.prom.check_ready()
+        kpis = state.detector.prom.snapshot(state.detector.kpi_names)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": f"Prometheus indisponible : {exc}"},
+                            status_code=503)
+
+    from detection.features import vector_from_kpis
+    verdict = state.detector.model.predict(vector_from_kpis(kpis))
+    if not verdict.is_attack:
+        return {"ok": False, "status": f"aucune attaque à remédier (état : {verdict.label})"}
+    ok, reason = state.engine.should_act(verdict.label, verdict.confidence)
+    if not ok:
+        return {"ok": False, "status": reason, "label": verdict.label}
+
+    label, conf, triggers = verdict.label, verdict.confidence, verdict.triggers
+
+    def work():
+        with state.lock:
+            state.remediating = True
+        try:
+            inc = state.engine.handle(label, conf, triggers)
+            with state.lock:
+                state.last_incident = inc
+        finally:
+            with state.lock:
+                state.remediating = False
+
+    threading.Thread(target=work, daemon=True).start()
+    return {"ok": True, "status": "remédiation lancée", "label": label}
 
 
 @app.get("/api/history")
