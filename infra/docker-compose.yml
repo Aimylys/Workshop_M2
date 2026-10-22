@@ -29,7 +29,7 @@ services:
     volumes:
       - ./nginx/default.conf.template:/etc/nginx/templates/conf.d/default.conf.template:ro
     ports:
-      - "8080:8080"
+      - "8088:8088"
     environment:
       BACKEND: "http://api:8000"
       MODSEC_RULE_ENGINE: "On"

@@ -1,0 +1,4 @@
+# Outils de test (poste de développement). Les services ont chacun leur requirements.txt.
+-r services/auth/requirements.txt
+pytest==8.3.4
+httpx==0.28.1

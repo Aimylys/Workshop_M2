@@ -1,0 +1,77 @@
+# KPI de la plateforme : DÉFINITION UNIQUE, partagée par tous les consommateurs.
+# Le collecteur (phase 3), la détection ML (phase 4), le dashboard (phase 6) et Grafana lisent
+# les séries « kpi:* » ; aucun d'eux ne réécrit de PromQL. Changer un nom de métrique de l'API
+# ne demande donc de modifier QUE ce fichier.
+#
+# Fenêtre glissante de 30 s (6 échantillons) ; les sondes /health des conteneurs sont exclues.
+groups:
+  - name: kpi
+    interval: 5s
+    rules:
+      # ---------- Trafic applicatif (auth + paiement) ----------
+      - record: kpi:req_per_sec
+        expr: sum(rate(http_requests_total{route!="/health"}[30s])) or vector(0)
+      - record: kpi:err_5xx_per_sec
+        expr: sum(rate(http_requests_total{route!="/health", status=~"5.."}[30s])) or vector(0)
+      - record: kpi:err_4xx_per_sec
+        expr: sum(rate(http_requests_total{route!="/health", status=~"4.."}[30s])) or vector(0)
+      - record: kpi:inprogress
+        expr: sum(http_inprogress_requests) or vector(0)
+      # Latences séparées : la connexion est lente par construction (Argon2) et réagit à la
+      # force brute ; le paiement réagit à la saturation (DDoS, base en difficulté).
+      - record: kpi:latency_p95_login_seconds
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket{job="auth", route="/login"}[30s])))
+      - record: kpi:latency_p95_payment_seconds
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket{job="payment-api", route!="/health"}[30s])))
+
+      # ---------- Authentification ----------
+      - record: kpi:login_ok_per_sec
+        expr: sum(rate(login_attempts_total{result="success"}[30s])) or vector(0)
+      - record: kpi:login_fail_per_sec
+        expr: sum(rate(login_attempts_total{result=~"failure|locked"}[30s])) or vector(0)
+
+      # ---------- Métier ----------
+      - record: kpi:tx_ok_per_sec
+        expr: sum(rate(transactions_total{status="success"}[30s])) or vector(0)
+      - record: kpi:tx_failed_per_sec
+        expr: sum(rate(transactions_total{status="failed"}[30s])) or vector(0)
+      - record: kpi:db_errors_per_sec
+        expr: sum(rate(db_errors_total[30s])) or vector(0)
+
+      # ---------- Disponibilité (1 = les deux services répondent) ----------
+      # absent du scrape = 0 : une API arrêtée ne « disparaît » pas des KPI, elle vaut 0.
+      - record: kpi:api_up
+        expr: min(up{job=~"auth|payment-api"}) or vector(0)
+
+      # ---------- Bordure (WAF) ----------
+      - record: kpi:edge_req_per_sec
+        expr: sum(rate(nginx_http_requests_total{job="waf"}[30s])) or vector(0)
+      - record: kpi:edge_connections
+        expr: sum(nginx_connections_active{job="waf"}) or vector(0)
+      # Connexions TCP ouvertes par seconde : un scan ouvre des connexions sans requête HTTP
+      - record: kpi:edge_conn_per_sec
+        expr: sum(rate(nginx_connections_accepted{job="waf"}[30s])) or vector(0)
+      # Réponses 404 vues par le WAF : signature d'une reconnaissance (énumération de chemins)
+      - record: kpi:waf_404_per_sec
+        expr: sum(rate(loki_process_custom_waf_not_found_total[30s])) or vector(0)
+      # Compteur produit par Alloy à partir des journaux du WAF (réponses 403 = requête bloquée)
+      - record: kpi:waf_blocked_per_sec
+        expr: sum(rate(loki_process_custom_waf_blocked_total[30s])) or vector(0)
+
+      # ---------- Ressources ----------
+      # Par service : métriques de processus exposées par les services eux-mêmes (prometheus_client).
+      # cAdvisor ne peut pas les fournir par conteneur sous Docker Desktop : il ne lit pas le
+      # stockage d'images containerd (« failed to identify the read-write layer ID »).
+      - record: kpi:api_cpu_cores
+        expr: sum(rate(process_cpu_seconds_total{job=~"auth|payment-api"}[30s])) or vector(0)
+      - record: kpi:api_mem_bytes
+        expr: sum(process_resident_memory_bytes{job=~"auth|payment-api"}) or vector(0)
+      # Machine virtuelle Docker entière (cgroup racine, mesuré par cAdvisor)
+      - record: kpi:host_cpu_cores
+        expr: sum(rate(container_cpu_usage_seconds_total{job="cadvisor", id="/"}[30s])) or vector(0)
+      - record: kpi:host_mem_bytes
+        expr: sum(container_memory_working_set_bytes{job="cadvisor", id="/"}) or vector(0)

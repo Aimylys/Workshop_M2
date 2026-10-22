@@ -1,0 +1,92 @@
+// Grafana Alloy : collecte les journaux des conteneurs du projet et les envoie à Loki.
+// Accès Docker en LECTURE SEULE via le proxy docker-proxy-ro (jamais le socket directement).
+
+discovery.docker "containers" {
+  host             = "tcp://docker-proxy-ro:2375"
+  refresh_interval = "10s"   // un conteneur recréé par la remédiation est suivi rapidement
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=alphapay"]
+  }
+}
+
+// Un flux par service compose : {service="payment-api"}, {service="waf"}...
+discovery.relabel "containers" {
+  targets = []
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "tcp://docker-proxy-ro:2375"
+  targets       = discovery.docker.containers.targets
+  relabel_rules = discovery.relabel.containers.rules
+  forward_to    = [loki.process.parse.receiver]
+}
+
+loki.process "parse" {
+  // Journaux JSON des services : niveau et type d'événement deviennent des labels
+  // (peu de valeurs possibles). L'IP et l'utilisateur restent dans la ligne : on les
+  // interroge en LogQL (| json | ip="...") sans exploser la cardinalité de Loki.
+  stage.json {
+    expressions = { level = "level", event = "event" }
+  }
+  stage.labels {
+    values = { level = "", event = "" }
+  }
+
+  // Journal d'audit ModSecurity (une règle a été déclenchée)
+  stage.match {
+    selector = "{service=\"waf\"} |= \"\\\"transaction\\\"\""
+    stage.static_labels {
+      values = { event = "waf_audit", level = "warning" }
+    }
+  }
+
+  // Compteurs dérivés des journaux du WAF, exposés à Prometheus (loki_process_custom_*)
+  stage.match {
+    selector = "{service=\"waf\", event=\"waf_access\"}"
+    stage.metrics {
+      metric.counter {
+        name        = "waf_requests_total"
+        description = "Requêtes vues par le WAF"
+        match_all   = true
+        action      = "inc"
+      }
+    }
+  }
+  stage.match {
+    selector = "{service=\"waf\", event=\"waf_access\"} |= \"\\\"status\\\":403\""
+    stage.metrics {
+      metric.counter {
+        name        = "waf_blocked_total"
+        description = "Requêtes refusées par le WAF (règle CRS ou liste de blocage)"
+        match_all   = true
+        action      = "inc"
+      }
+    }
+  }
+
+  stage.match {
+    selector = "{service=\"waf\", event=\"waf_access\"} |= \"\\\"status\\\":404\""
+    stage.metrics {
+      metric.counter {
+        name        = "waf_not_found_total"
+        description = "Réponses 404 renvoyées via le WAF (chemins inexistants)"
+        match_all   = true
+        action      = "inc"
+      }
+    }
+  }
+
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

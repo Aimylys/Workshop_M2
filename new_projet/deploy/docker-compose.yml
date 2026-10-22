@@ -1,0 +1,303 @@
+# Plateforme de paiement fictive Resilience-Alpha.
+# Lancement (depuis new_projet/) :
+#   python deploy/gen_secrets.py
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#
+# Réseaux (seul « edge » et « ops » sont des réseaux non internes, pour publier des ports) :
+#   edge       : WAF seul ; publié sur EDGE_BIND:EDGE_PORT (127.0.0.1:8088 par défaut,
+#                192.168.137.1 pour la démonstration avec le PC attaquant)
+#   web        : interne, WAF <-> frontal (IP fixe du WAF : seule source d'IP client de confiance)
+#   app        : interne, frontal <-> microservices
+#   data       : interne, microservices <-> base ; la base n'est jamais publiée
+#   monitoring : interne, collecte des métriques et des journaux
+#   ops        : publie Prometheus et Grafana sur 127.0.0.1 UNIQUEMENT (poste hôte)
+
+# Nom de projet distinct des prototypes précédents (« resilience-alpha ») pour ne partager
+# avec eux ni conteneurs, ni réseaux, ni volumes.
+name: alphapay
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: [/tmp]
+  restart: unless-stopped
+
+x-pyhealth: &pyhealth
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+  interval: 5s
+  timeout: 3s
+  retries: 6
+  start_period: 10s
+
+services:
+  # ======================= Plateforme métier =======================
+  db:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_USER: pgadmin
+      POSTGRES_DB: payments
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password, auth_db_password, payment_db_password]
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+      - ../services/db/init:/docker-entrypoint-initdb.d:ro
+    networks: [data]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pgadmin -d payments"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 512m
+    restart: unless-stopped
+
+  auth:
+    <<: *hardening
+    build:
+      context: ../services
+      dockerfile: auth/Dockerfile
+    environment:
+      SERVICE_NAME: auth
+      ROOT_PATH: /api/auth
+      DB_HOST: db
+      DB_NAME: payments
+      DB_USER: auth_svc
+      DB_PASSWORD_FILE: /run/secrets/auth_db_password
+      JWT_SECRET_FILE: /run/secrets/jwt_secret
+      DEMO_PASSWORD_FILE: /run/secrets/demo_password
+      PROBE_PASSWORD_FILE: /run/secrets/probe_password
+      LOCKOUT_THRESHOLD: "10"
+      LOCKOUT_MINUTES: "5"
+      HASH_CONCURRENCY: "2"
+      # Argon2 alloue ~19 Mo par calcul. Sans ces réglages, la glibc garde ces blocs dans une
+      # réserve par thread (uvicorn en a ~40) et la mémoire grimpe jusqu'à l'OOM. Ici, tout
+      # bloc > 1 Mo passe par mmap et est rendu au système dès sa libération.
+      MALLOC_ARENA_MAX: "2"
+      MALLOC_MMAP_THRESHOLD_: "1048576"
+    secrets: [auth_db_password, jwt_secret, demo_password, probe_password]
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [app, data, monitoring]
+    healthcheck: *pyhealth
+    mem_limit: 256m
+
+  payment-api:
+    <<: *hardening
+    build:
+      context: ../services
+      dockerfile: payment-api/Dockerfile
+    environment:
+      SERVICE_NAME: payment-api
+      ROOT_PATH: /api/pay
+      DB_HOST: db
+      DB_NAME: payments
+      DB_USER: payment_svc
+      DB_PASSWORD_FILE: /run/secrets/payment_db_password
+      JWT_SECRET_FILE: /run/secrets/jwt_secret
+      POOL_MAX: "10"
+    secrets: [payment_db_password, jwt_secret]
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [app, data, monitoring]
+    healthcheck: *pyhealth
+    mem_limit: 256m
+
+  frontend:
+    <<: *hardening
+    build: ../services/frontend
+    depends_on:
+      auth: { condition: service_healthy }
+      payment-api: { condition: service_healthy }
+    networks: [web, app]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+    mem_limit: 64m
+
+  # ======================= Bordure =======================
+  waf:
+    build: ../services/waf
+    environment:
+      BACKEND: http://frontend:8080
+      MODSEC_RULE_ENGINE: "On"            # blocage effectif (pas seulement détection)
+      BLOCKING_PARANOIA: "1"
+      ANOMALY_INBOUND: "5"
+      # Audit : en-tête (A), messages des règles (H) et fin (Z) seulement — jamais les corps
+      # ni les en-têtes de requête (mots de passe, jetons).
+      MODSEC_AUDIT_LOG_PARTS: AHZ
+      MODSEC_AUDIT_LOG_RELEVANT_STATUS: "^(?:5|403)"
+      ERRORLOG: /dev/stderr
+      METRICS_ALLOW_FROM: 172.30.1.0/24    # stub_status lisible par l'exporter (réseau web) uniquement
+      SERVER_HEADER: ""
+    ports:
+      - "${EDGE_BIND:-127.0.0.1}:${EDGE_PORT:-8088}:8080"
+    volumes:
+      - waf-blocklist:/etc/modsecurity.d/blocklist   # partagé avec la remédiation (phase 7)
+    depends_on:
+      frontend: { condition: service_healthy }
+    networks:
+      edge: {}
+      web: { ipv4_address: 172.30.1.10 }
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+    mem_limit: 256m
+    restart: unless-stopped
+
+  # ======================= Observabilité =======================
+  prometheus:
+    <<: *hardening
+    image: prom/prometheus:v2.55.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=48h
+    volumes:
+      - ../observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../observability/prometheus/rules:/etc/prometheus/rules:ro
+      - promdata:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks: [monitoring, ops]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    mem_limit: 512m
+
+  loki:
+    <<: *hardening
+    image: grafana/loki:3.3.2
+    command: -config.file=/etc/loki/loki.yml
+    volumes:
+      - ../observability/loki/loki.yml:/etc/loki/loki.yml:ro
+      - lokidata:/loki
+    ports:
+      - "127.0.0.1:3100:3100"    # lu par la remédiation (IP source) ; hôte uniquement
+    networks: [monitoring, ops]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3100/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    mem_limit: 384m
+
+  # Proxy Docker en LECTURE SEULE pour Alloy (lister les conteneurs, lire leurs journaux)
+  docker-proxy-ro:
+    image: tecnativa/docker-socket-proxy:0.2.0
+    environment:
+      CONTAINERS: 1     # lister les conteneurs, lire leurs journaux
+      NETWORKS: 1       # lister les réseaux (requis par la découverte Docker d'Alloy)
+      POST: 0           # aucune écriture : ni démarrage, ni arrêt, ni exec
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [monitoring]
+    mem_limit: 64m
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:v1.5.1
+    command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/tmp/alloy /etc/alloy/config.alloy
+    volumes:
+      - ../observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+    depends_on: [loki, docker-proxy-ro]
+    networks: [monitoring]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    restart: unless-stopped
+
+  cadvisor:
+    # v0.53+ requise : les versions antérieures ne lisent pas le stockage containerd de Docker Desktop
+    image: ghcr.io/google/cadvisor:v0.53.0
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=5s
+      - --store_container_labels=false
+      - --whitelisted_container_labels=com.docker.compose.service,com.docker.compose.project
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    devices: [/dev/kmsg]
+    privileged: true            # requis par cAdvisor pour lire les cgroups ; réseau interne, rien n'est publié
+    networks: [monitoring]
+    mem_limit: 256m
+    restart: unless-stopped
+
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.4.0
+    command: --nginx.scrape-uri=http://172.30.1.10:8080/metrics/nginx
+    networks: [web, monitoring]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 32m
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/platform.json
+    secrets: [grafana_admin_password]
+    volumes:
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on: [prometheus, loki]
+    networks: [monitoring, ops]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    restart: unless-stopped
+
+networks:
+  edge: {}
+  ops: {}
+  web:
+    internal: true
+    ipam:
+      config: [{ subnet: 172.30.1.0/24 }]
+  app:
+    internal: true
+  data:
+    internal: true
+  monitoring:
+    internal: true
+
+volumes:
+  dbdata: {}
+  promdata: {}
+  lokidata: {}
+  grafanadata: {}
+  waf-blocklist: {}
+
+# Fichiers générés par deploy/gen_secrets.py, jamais versionnés (chiffrés par SOPS en phase 8).
+secrets:
+  postgres_password:      { file: ./secrets/postgres_password }
+  auth_db_password:       { file: ./secrets/auth_db_password }
+  payment_db_password:    { file: ./secrets/payment_db_password }
+  jwt_secret:             { file: ./secrets/jwt_secret }
+  demo_password:          { file: ./secrets/demo_password }
+  probe_password:         { file: ./secrets/probe_password }
+  grafana_admin_password: { file: ./secrets/grafana_admin_password }

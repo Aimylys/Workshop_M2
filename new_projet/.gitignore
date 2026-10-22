@@ -1,0 +1,35 @@
+# Secrets : jamais en clair dans le dépôt (seule la version chiffrée SOPS *.enc est versionnée)
+deploy/secrets/*
+!deploy/secrets/*.enc
+!deploy/secrets/.gitkeep
+.env
+*.key
+*.age
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+
+# Données et modèles régénérables
+data/**/dataset*.csv
+data/**/label.txt
+data/**/label.tmp
+data/**/label_history.csv
+detection/models/
+assistant/faiss_index/
+# profiles.md est généré par detection.index à partir du dataset (régénérable)
+assistant/knowledge/profiles.md
+
+# Journal de remédiation (trace d'exécution, régénérable)
+remediation/journal/
+
+# Divers
+*.log
+.DS_Store
+Thumbs.db

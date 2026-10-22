@@ -1,0 +1,107 @@
+{
+  "uid": "resilience-platform",
+  "title": "Plateforme de paiement — état et KPI",
+  "tags": ["resilience-alpha"],
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "schemaVersion": 39,
+  "editable": false,
+  "panels": [
+    {
+      "type": "stat", "title": "API disponible", "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "kpi:api_up" }],
+      "fieldConfig": { "defaults": {
+        "mappings": [{ "type": "value", "options": {
+          "0": { "text": "HORS SERVICE", "color": "red" }, "1": { "text": "EN SERVICE", "color": "green" } } }],
+        "color": { "mode": "thresholds" },
+        "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } } },
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "stat", "title": "Requêtes / s (API)", "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "kpi:req_per_sec" }],
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 1 } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "stat", "title": "Latence p95 paiement", "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "kpi:latency_p95_payment_seconds" }],
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 3, "color": { "mode": "thresholds" },
+        "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.5 }, { "color": "red", "value": 1 }] } } },
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "stat", "title": "Virements réussis / s", "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "kpi:tx_ok_per_sec" }],
+      "fieldConfig": { "defaults": { "decimals": 2 } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "stat", "title": "Échecs de connexion / s", "gridPos": { "x": 16, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "kpi:login_fail_per_sec" }],
+      "fieldConfig": { "defaults": { "decimals": 2, "color": { "mode": "thresholds" },
+        "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 2 }] } } },
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "stat", "title": "Bloquées par le WAF / s", "gridPos": { "x": 20, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "kpi:waf_blocked_per_sec" }],
+      "fieldConfig": { "defaults": { "decimals": 2, "color": { "mode": "thresholds" },
+        "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0.5 }] } } },
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "timeseries", "title": "Trafic", "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "kpi:edge_req_per_sec", "legendFormat": "bordure (WAF)" },
+        { "refId": "B", "expr": "kpi:req_per_sec", "legendFormat": "API" },
+        { "refId": "C", "expr": "kpi:err_4xx_per_sec", "legendFormat": "erreurs 4xx" },
+        { "refId": "D", "expr": "kpi:err_5xx_per_sec", "legendFormat": "erreurs 5xx" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "type": "timeseries", "title": "Métier et authentification", "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "kpi:tx_ok_per_sec", "legendFormat": "virements réussis" },
+        { "refId": "B", "expr": "kpi:tx_failed_per_sec", "legendFormat": "virements refusés" },
+        { "refId": "C", "expr": "kpi:login_ok_per_sec", "legendFormat": "connexions réussies" },
+        { "refId": "D", "expr": "kpi:login_fail_per_sec", "legendFormat": "connexions échouées" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Charge et latence", "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "kpi:latency_p95_payment_seconds", "legendFormat": "p95 paiement (s)" },
+        { "refId": "D", "expr": "kpi:latency_p95_login_seconds", "legendFormat": "p95 connexion (s)" },
+        { "refId": "B", "expr": "kpi:inprogress", "legendFormat": "requêtes en cours" },
+        { "refId": "C", "expr": "kpi:db_errors_per_sec", "legendFormat": "erreurs base / s" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Ressources (CPU en cœurs)", "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "kpi:api_cpu_cores", "legendFormat": "services auth + paiement" },
+        { "refId": "B", "expr": "kpi:host_cpu_cores", "legendFormat": "VM Docker entière" }
+      ]
+    },
+    {
+      "type": "logs", "title": "Événements de sécurité (WAF, connexions refusées, virements rejetés, erreurs)",
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 10 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "refId": "A", "expr": "{service=~\".+\", level=~\"warning|error\"}" }],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" }
+    }
+  ]
+}

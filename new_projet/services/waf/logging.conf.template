@@ -1,0 +1,10 @@
+# Remplace le gabarit de journalisation de l'image : une ligne JSON par requête.
+# Pas de corps ni d'en-tête Authorization : aucun mot de passe ni jeton dans les journaux.
+log_format waf_json escape=json
+    '{"ts":"$time_iso8601","level":"info","service":"waf","event":"waf_access",'
+    '"ip":"$remote_addr","method":"$request_method","uri":"$request_uri",'
+    '"status":$status,"bytes":$body_bytes_sent,"duration_s":$request_time,'
+    '"user_agent":"$http_user_agent"}';
+
+access_log /dev/stdout waf_json;
+error_log ${ERRORLOG} ${LOGLEVEL};
