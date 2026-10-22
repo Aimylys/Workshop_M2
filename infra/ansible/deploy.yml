@@ -1,0 +1,50 @@
+# Déploiement reproductible de la plateforme sur le PC Hôte
+- name: Déployer la plateforme
+  hosts: local
+  gather_facts: false
+  tasks:
+    - name: Vérifier que Docker répond
+      ansible.builtin.command: docker info
+      changed_when: false
+      register: docker_info
+      failed_when: docker_info.rc != 0
+
+    - name: Vérifier la présence du fichier .env
+      ansible.builtin.stat:
+        path: "{{ infra_dir }}/.env"
+      register: env_file
+      failed_when: not env_file.stat.exists
+
+    - name: Vérifier la présence du secret du webhook
+      ansible.builtin.stat:
+        path: "{{ infra_dir }}/secrets/webhook_token.txt"
+      register: token_file
+      failed_when: not token_file.stat.exists
+
+    - name: Valider la configuration Compose
+      ansible.builtin.command: "{{ compose }} config --quiet"
+      args:
+        chdir: "{{ infra_dir }}"
+      changed_when: false
+
+    - name: Créer le dossier de sauvegardes
+      ansible.builtin.file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Lancer la plateforme
+      ansible.builtin.command: "{{ compose }} up -d --build"
+      args:
+        chdir: "{{ infra_dir }}"
+      register: up
+      changed_when: "'Created' in up.stderr or 'Started' in up.stderr or 'Recreated' in up.stderr"
+
+    - name: Attendre les services
+      ansible.builtin.include_tasks: tasks/wait_healthy.yml
+
+    - name: État final
+      ansible.builtin.command: "{{ compose }} ps"
+      args:
+        chdir: "{{ infra_dir }}"
+      changed_when: false

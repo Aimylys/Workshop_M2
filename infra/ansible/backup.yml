@@ -1,0 +1,20 @@
+# Sauvegarde ponctuelle de la base (en plus de la sauvegarde périodique du conteneur 'backup')
+- name: Sauvegarder la base
+  hosts: local
+  gather_facts: false
+  tasks:
+    - name: Créer le dossier de sauvegardes
+      ansible.builtin.file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Dump de la base
+      ansible.builtin.shell: |
+        set -o pipefail
+        {{ compose }} exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+          | gzip > "{{ backup_dir }}/db-manual-$(date +%Y%m%d-%H%M%S).sql.gz"
+      args:
+        chdir: "{{ infra_dir }}"
+        executable: /bin/bash
+      changed_when: true

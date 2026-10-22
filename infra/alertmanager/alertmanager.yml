@@ -1,0 +1,16 @@
+route:
+  receiver: orchestrator
+  group_by: ["alertname", "job"]
+  group_wait: 0s
+  group_interval: 10s
+  repeat_interval: 1m
+
+receivers:
+  - name: orchestrator
+    webhook_configs:
+      - url: http://orchestrator:8000/webhook/alert   # à aligner avec le dev
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /run/secrets/webhook_token   # secret fourni par SOPS, jamais en clair

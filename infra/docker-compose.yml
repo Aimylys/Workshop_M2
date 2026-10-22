@@ -1,0 +1,87 @@
+# Compose principal : réseaux, secrets, base de données.
+# Les services métier (auth, api, frontend, waf, ml, orchestrator, rag) s'ajouteront ici au fil des jours.
+# Lancement : voir Makefile (make up)
+
+name: resilience-alpha
+
+services:
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    networks: [back]
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 512m
+    restart: unless-stopped
+
+  waf:
+    image: owasp/modsecurity-crs:nginx
+    container_name: waf-modsecurity
+    volumes:
+      - ./nginx/default.conf.template:/etc/nginx/templates/conf.d/default.conf.template:ro
+    ports:
+      - "8080:8080"
+    environment:
+      BACKEND: "http://api:8000"
+      MODSEC_RULE_ENGINE: "On"
+      PARANOIA: "1"
+    depends_on:
+      - api 
+    networks:
+      - front
+
+
+  api:
+    build:
+      context: ../services/api
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${POSTGRES_DB}
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:?DEMO_PASSWORD manquant dans .env}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - back
+      - front
+
+networks:
+  front:
+    external: true
+    name: resilience-alpha_front
+
+  back:
+    external: true
+    name: resilience-alpha_back
+
+  app:
+    external: true
+    name: resilience-alpha_app
+
+  monitoring:
+    external: true
+    name: resilience-alpha_monitoring
+
+  remediation:
+    external: true
+    name: resilience-alpha_remediation
+
+secrets:
+  webhook_token:
+    file: ./secrets/webhook_token.txt   # fichier NON versionné (en vrai : déchiffré par SOPS)
+
+volumes:
+  dbdata: {}

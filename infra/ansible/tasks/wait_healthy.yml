@@ -1,0 +1,14 @@
+# Attend que chaque service de 'wait_services' soit healthy
+- name: Attendre que les services soient healthy
+  ansible.builtin.shell: |
+    cid=$({{ compose }} ps -q {{ item }})
+    [ -n "$cid" ] && [ "$(docker inspect --format '{% raw %}{{.State.Health.Status}}{% endraw %}' "$cid")" = "healthy" ]
+  args:
+    chdir: "{{ infra_dir }}"
+    executable: /bin/bash
+  register: health
+  until: health.rc == 0
+  retries: "{{ wait_retries }}"
+  delay: "{{ wait_delay }}"
+  changed_when: false
+  loop: "{{ wait_services }}"

@@ -1,0 +1,27 @@
+# Données collectées (lourdes, régénérables)
+collector/dataset*.csv
+collector/label.txt
+
+# Binaires d'outils (à télécharger, pas à versionner)
+hey.exe
+*.exe
+
+# Index vectoriel RAG (régénérable avec build_index.py)
+ai/faiss_index/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Données de la base (volume Docker local)
+pgdata/
+
+# Logs et temporaires
+*.log
+*.tmp
+
+# Fichiers système
+.DS_Store
+Thumbs.db

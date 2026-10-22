@@ -1,0 +1,6 @@
+.env
+secrets/*
+!secrets/.gitkeep
+*.key
+*.age
+default.conf

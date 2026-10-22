@@ -1,0 +1,33 @@
+# Remise à zéro de la démo : repart d'une base neuve (rechargée par les scripts d'init du dev)
+# et de conteneurs recréés. Les volumes de monitoring sont conservés sauf -e purge_monitoring=true.
+- name: Remettre la plateforme à l'état initial
+  hosts: local
+  gather_facts: false
+  vars:
+    purge_monitoring: false
+  tasks:
+    - name: Arrêter la plateforme
+      ansible.builtin.command: "{{ compose }} down --remove-orphans"
+      args:
+        chdir: "{{ infra_dir }}"
+      changed_when: true
+
+    - name: Supprimer le volume de la base
+      ansible.builtin.command: "docker volume rm -f {{ project_name }}_dbdata"
+      changed_when: true
+
+    - name: Supprimer les volumes de monitoring (optionnel)
+      ansible.builtin.command: "docker volume rm -f {{ project_name }}_promdata {{ project_name }}_lokidata"
+      when: purge_monitoring | bool
+      changed_when: true
+
+    # TODO avec la cyber : débloquer les IP bannies par la remédiation (liste de blocage du WAF)
+
+    - name: Relancer la plateforme
+      ansible.builtin.command: "{{ compose }} up -d"
+      args:
+        chdir: "{{ infra_dir }}"
+      changed_when: true
+
+    - name: Attendre les services
+      ansible.builtin.include_tasks: tasks/wait_healthy.yml
