@@ -1,0 +1,28 @@
+{
+  "brute_force": {
+    "host": "10.188.214.138",
+    "port": "8000",
+    "endpoint": "/login",
+    "duration": "90",
+    "threads": "200",
+    "username": "admin",
+    "password": "wrong"
+  },
+  "port_scan": {
+    "host": "localhost",
+    "port": "1-10000"
+  },
+  "sql_injection": {
+    "host": "10.188.214.138",
+    "port": "8000",
+    "endpoint": "/accounts/1",
+    "duration": "60"
+  },
+  "ddos": {
+    "host": "10.188.214.138",
+    "port": "8000",
+    "endpoint": "/accounts/1",
+    "duration": "40",
+    "threads": "150"
+  }
+}

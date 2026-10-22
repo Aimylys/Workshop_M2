@@ -5,7 +5,9 @@ Aucune donnée réelle : tout est simulé.
 """
 import os
 import time
+import contextlib
 import psycopg2
+from psycopg2 import pool as pgpool
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -33,8 +35,23 @@ SQL_ERRORS = Counter("sql_errors_total", "Erreurs SQL (signal injection)")
 INPROGRESS = Gauge("http_inprogress_requests", "Requêtes en cours")
 
 
-def db():
-    return psycopg2.connect(DB_URL)
+# Pool de connexions : réutilise les connexions au lieu d'en ouvrir une par
+# requête (ce qui saturait PostgreSQL et générait de fausses erreurs SQL).
+POOL = pgpool.SimpleConnectionPool(1, 20, dsn=DB_URL)
+
+
+@contextlib.contextmanager
+def db_conn():
+    """Emprunte une connexion au pool et la REND toujours, même en cas d'erreur."""
+    conn = POOL.getconn()
+    try:
+        yield conn
+    finally:
+        try:
+            conn.rollback()   # annule toute transaction en cours avant de rendre
+        except psycopg2.Error:
+            pass
+        POOL.putconn(conn)
 
 
 # ---------- Middleware : mesure CHAQUE requête ----------
@@ -73,7 +90,8 @@ class TxIn(BaseModel):
 def health():
     """Sonde de vie : utilisée pour vérifier que le service est rétabli."""
     try:
-        c = db(); cur = c.cursor(); cur.execute("SELECT 1"); cur.close(); c.close()
+        with db_conn() as c:
+            cur = c.cursor(); cur.execute("SELECT 1"); cur.close()
         return {"status": "up"}
     except Exception:
         raise HTTPException(503, "db down")
@@ -81,10 +99,15 @@ def health():
 
 @app.post("/login")
 def login(data: LoginIn):
-    c = db(); cur = c.cursor()
-    cur.execute("SELECT id FROM users WHERE username=%s AND password=%s",
-                (data.username, data.password))
-    row = cur.fetchone(); cur.close(); c.close()
+    try:
+        with db_conn() as c:
+            cur = c.cursor()
+            cur.execute("SELECT id FROM users WHERE username=%s AND password=%s",
+                        (data.username, data.password))
+            row = cur.fetchone(); cur.close()
+    except psycopg2.Error:
+        SQL_ERRORS.inc()
+        raise HTTPException(500, "sql error")
     if row:
         LOGIN_OK.inc()
         return {"token": f"demo-token-{row[0]}"}
@@ -96,16 +119,17 @@ def login(data: LoginIn):
 def transaction(tx: TxIn):
     """Exécute une transaction fictive : débit + crédit + journal."""
     try:
-        c = db(); cur = c.cursor()
-        cur.execute("UPDATE accounts SET balance = balance - %s WHERE id=%s",
-                    (tx.amount, tx.from_acc))
-        cur.execute("UPDATE accounts SET balance = balance + %s WHERE id=%s",
-                    (tx.amount, tx.to_acc))
-        cur.execute(
-            "INSERT INTO transactions (from_acc,to_acc,amount) VALUES (%s,%s,%s) RETURNING id",
-            (tx.from_acc, tx.to_acc, tx.amount))
-        tid = cur.fetchone()[0]
-        c.commit(); cur.close(); c.close()
+        with db_conn() as c:
+            cur = c.cursor()
+            cur.execute("UPDATE accounts SET balance = balance - %s WHERE id=%s",
+                        (tx.amount, tx.from_acc))
+            cur.execute("UPDATE accounts SET balance = balance + %s WHERE id=%s",
+                        (tx.amount, tx.to_acc))
+            cur.execute(
+                "INSERT INTO transactions (from_acc,to_acc,amount) VALUES (%s,%s,%s) RETURNING id",
+                (tx.from_acc, tx.to_acc, tx.amount))
+            tid = cur.fetchone()[0]
+            c.commit(); cur.close()
         TX_TOTAL.labels("OK").inc()
         return {"transaction_id": tid, "status": "OK"}
     except psycopg2.Error:
@@ -117,15 +141,16 @@ def transaction(tx: TxIn):
 @app.get("/accounts/{acc_id}")
 def get_account(acc_id: int):
     try:
-        c = db(); cur = c.cursor()
-        cur.execute("SELECT owner, balance FROM accounts WHERE id=%s", (acc_id,))
-        row = cur.fetchone(); cur.close(); c.close()
-        if not row:
-            raise HTTPException(404, "not found")
-        return {"owner": row[0], "balance": float(row[1])}
+        with db_conn() as c:
+            cur = c.cursor()
+            cur.execute("SELECT owner, balance FROM accounts WHERE id=%s", (acc_id,))
+            row = cur.fetchone(); cur.close()
     except psycopg2.Error:
         SQL_ERRORS.inc()
         raise HTTPException(500, "sql error")
+    if not row:
+        raise HTTPException(404, "not found")
+    return {"owner": row[0], "balance": float(row[1])}
 
 
 @app.get("/metrics")
