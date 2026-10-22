@@ -27,7 +27,7 @@ services:
     image: owasp/modsecurity-crs:nginx
     container_name: waf-modsecurity
     volumes:
-      - ./nginx/default.conf.template:/etc/nginx/templates/conf.d
+      - ./nginx/default.conf.template:/etc/nginx/templates/conf.d/default.conf.template:ro
     ports:
       - "8080:8080"
     environment:
