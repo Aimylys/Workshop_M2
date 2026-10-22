@@ -21,6 +21,8 @@ server {
     
 
     location / {
+        limit_req zone=flood_limit burst=20 nodelay;
+        limit_conn conn_limit 20;
        
         client_max_body_size 0;
 
