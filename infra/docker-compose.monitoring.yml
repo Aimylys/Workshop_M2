@@ -86,6 +86,13 @@ services:
     mem_limit: 64m
     restart: unless-stopped
 
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:latest
+    command:
+      - -nginx.scrape-uri=http://localhost:8080/stub_status
+    networks:
+      - monitoring
+
   cadvisor:                   # optionnel : docker compose --profile cadvisor ... (peut échouer sous WSL2)
     profiles: ["cadvisor"]
     image: gcr.io/cadvisor/cadvisor:v0.49.1
