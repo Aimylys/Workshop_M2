@@ -43,11 +43,4 @@ groups:
           summary: "Pic de connexions détecté sur le WAF"
           description: "{{ $value }} connexions actives, seuil dépassé"
 
-      - alert: SQLi-WAFBlocked
-        expr: count_over_time({container="waf-modsecurity"} |= "Access denied" [1m]) > 20
-        for: 0s
-        labels:
-          severity: warning
-          scenario: sqli_blocked
-        annotations:
-          summary: "Blocages WAF répétés détectés"
+

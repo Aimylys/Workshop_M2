@@ -47,6 +47,7 @@ services:
     command: -config.file=/etc/loki/loki-config.yml
     volumes:
       - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - ./loki/loki-rules:/etc/loki/rules:ro
       - lokidata:/loki
     networks: [monitoring]
     mem_limit: 384m
