@@ -41,12 +41,22 @@
   .ribbon.show { display: block; }
   .ribbon.ok { background: #0f2a1a; border: 1px solid #1f7a4d; color: #7ee2a8; }
   .ribbon.contained { background: #1b2340; border: 1px solid #3a5bbf; color: #a9c2ff; }
-  .remedbtn { margin-top: 12px; width: 100%; padding: 12px 16px; font-size: 14px; font-weight: 700;
+  .remedbtn { flex: 1; padding: 12px 16px; font-size: 14px; font-weight: 700;
               color: #fff; background: #c0392b; border: 0; border-radius: 9px; cursor: pointer;
               letter-spacing: .3px; transition: .15s; }
   .remedbtn:hover { background: #d8452f; }
   .remedbtn:disabled { background: #333a52; color: #7c87a3; cursor: not-allowed; }
   .remedmsg { font-size: 12px; color: #9fb3d1; margin-top: 8px; min-height: 16px; }
+  .remedrow { display: flex; gap: 10px; align-items: stretch; margin-top: 12px; }
+  .cdchip { display: flex; align-items: center; gap: 6px; background: #10233f; border: 1px solid #2f6fd0;
+            color: #8fc1ff; border-radius: 9px; padding: 0 6px 0 12px; font-size: 13px; font-weight: 700;
+            white-space: nowrap; }
+  .cdchip .cdx { background: transparent; border: 0; color: #8fc1ff; cursor: pointer; font-size: 14px;
+                 font-weight: 700; padding: 2px 4px; line-height: 1; }
+  .cdchip .cdx:hover { color: #fff; }
+  .cdbar { height: 6px; background: #0b1631; border-radius: 3px; margin-top: 9px; overflow: hidden; }
+  .cdfill { height: 100%; width: 100%; background: linear-gradient(90deg, #2f6fd0, #7aa2f7);
+            transition: width .9s linear; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
   .tile { background: linear-gradient(180deg, #141d3a, #111831); border: 1px solid #1e2742;
           border-radius: 12px; padding: 13px 15px; box-shadow: 0 6px 18px rgba(0,0,0,.22);
@@ -115,7 +125,14 @@
       <div class="card">
         <h2>Remédiation</h2>
         <div class="rem" id="rem">—</div>
-        <button id="remedbtn" class="remedbtn" style="display:none" onclick="triggerRemed()">⚡ Déclencher la remédiation</button>
+        <div id="remedrow" class="remedrow" style="display:none">
+          <button id="remedbtn" class="remedbtn" onclick="triggerRemed()">⚡ Déclencher la remédiation</button>
+          <div id="cdchip" class="cdchip" title="Remédiation automatique si vous ne cliquez pas">
+            <span id="cdtext">auto dans 5 s</span>
+            <button class="cdx" onclick="cancelCountdown()" title="Annuler le déclenchement auto">✕</button>
+          </div>
+        </div>
+        <div id="cdbar" class="cdbar" style="display:none"><div id="cdfill" class="cdfill"></div></div>
         <div class="remedmsg" id="remedmsg"></div>
       </div>
       <div class="card">
@@ -198,26 +215,63 @@ function setBanner(kind, state, sub, conf="") {
   document.getElementById("conf").textContent = conf;
 }
 
-let remedRequested = 0;          // instant du clic (pour relier le clic au démarrage réel)
+let remedRequested = 0;          // instant du déclenchement (pour relier au démarrage réel du moteur)
 let remedMarks = [];             // instants où la remédiation a clos un incident (repères sur la courbe)
+let cdRemaining = 0, cdLabel = null, cdFiredFor = null;   // compte à rebours de remédiation auto
+const CD_SECONDS = 5;
 
 function updateRemedButton(d, attack) {
-  const btn = document.getElementById("remedbtn");
-  if (!d.engine_available) { btn.style.display = "none"; return; }
+  const btn = document.getElementById("remedbtn"), row = document.getElementById("remedrow");
+  const chip = document.getElementById("cdchip"), bar = document.getElementById("cdbar");
+  if (!d.engine_available) { row.style.display = "none"; bar.style.display = "none"; return; }
   const bridging = (Date.now() - remedRequested) < 8000;     // le temps que le moteur démarre
   if (d.remediating || bridging) {
-    btn.style.display = "block"; btn.disabled = true; btn.textContent = "⏳ Remédiation en cours…";
-  } else if (attack) {
-    btn.style.display = "block"; btn.disabled = false;
-    btn.textContent = "⚡ Déclencher la remédiation (" + d.verdict.label + ")";
-  } else {
-    btn.style.display = "none";
+    cdRemaining = 0; chip.style.display = "none"; bar.style.display = "none";
+    row.style.display = "flex"; btn.disabled = true; btn.textContent = "⏳ Remédiation en cours…";
+    return;
   }
+  if (attack) {
+    const label = d.verdict.label;
+    row.style.display = "flex"; btn.disabled = false; btn.textContent = "⚡ Déclencher la remédiation";
+    if (cdFiredFor === label) {              // déjà déclenché/annulé : bouton seul, sans décompte
+      chip.style.display = "none"; bar.style.display = "none"; return;
+    }
+    if (cdRemaining <= 0) { cdRemaining = CD_SECONDS; cdLabel = label; }   // (re)démarrer le décompte
+    chip.style.display = "flex"; bar.style.display = "block"; renderCountdown();
+  } else {                                   // trafic normal : on remet le décompte à zéro
+    cdRemaining = 0; cdFiredFor = null; row.style.display = "none"; bar.style.display = "none";
+  }
+}
+
+function renderCountdown() {
+  const t = document.getElementById("cdtext"); if (t) t.textContent = "auto dans " + cdRemaining + " s";
+  const f = document.getElementById("cdfill"); if (f) f.style.width = (100 * cdRemaining / CD_SECONDS) + "%";
+}
+
+function countdownTick() {
+  if (cdRemaining > 0) { cdRemaining -= 1; renderCountdown(); if (cdRemaining <= 0) fireAuto(); }
+}
+
+function fireAuto() {                          // fin du décompte -> clic automatique (sans intervention)
+  cdFiredFor = cdLabel; cdRemaining = 0;
+  document.getElementById("cdchip").style.display = "none";
+  document.getElementById("cdbar").style.display = "none";
+  triggerRemed();
+}
+
+function cancelCountdown() {
+  cdFiredFor = cdLabel; cdRemaining = 0;
+  document.getElementById("cdchip").style.display = "none";
+  document.getElementById("cdbar").style.display = "none";
+  document.getElementById("remedmsg").textContent = "déclenchement auto annulé — clique le bouton pour remédier.";
 }
 
 async function triggerRemed() {
   const btn = document.getElementById("remedbtn"), msg = document.getElementById("remedmsg");
   remedRequested = Date.now();
+  cdRemaining = 0; cdFiredFor = cdLabel;                       // le clic (ou l'auto) arrête le décompte
+  const chip = document.getElementById("cdchip"); if (chip) chip.style.display = "none";
+  const bar = document.getElementById("cdbar"); if (bar) bar.style.display = "none";
   btn.disabled = true; btn.textContent = "⏳ Remédiation en cours…";
   msg.textContent = "demande envoyée au moteur de remédiation…";
   try {
@@ -296,6 +350,7 @@ tick(); drawChart(); remediation();
 setInterval(tick, 2500);
 setInterval(drawChart, 2500);
 setInterval(remediation, 2500);
+setInterval(countdownTick, 1000);
 </script>
 </body>
 </html>
